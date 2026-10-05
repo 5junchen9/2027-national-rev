@@ -192,3 +192,19 @@ class HandoverTests(unittest.TestCase):
         for key,value in [('flip','1'),('device','different'),('backend','usb')]:
             changed=deepcopy(faster);changed['belly'][key]=value
             with self.assertRaises(ValueError):validate(head,foot,changed)
+
+    def test_growing_partial_belly_ball_can_take_over_without_pose_stability(self):
+        head_tracker,belly_tracker=PatchTracker(),PatchTracker()
+        state=Handover(dict(forward=129,down_sign=1,bounds=[85,137]))
+        for i,y in enumerate((-19,-16,-13,-10,-7,-4,0)):
+            hf=np.zeros((240,320,3),np.uint8);bf=hf.copy()
+            cv2.circle(hf,(160,238),30,(0,240,210),-1)
+            cv2.circle(bf,(160,y),30,(0,240,210),-1)
+            hb=head_tracker.update(hf);bb=belly_tracker.update(bf)
+            self.assertIsNotNone(hb);self.assertIsNotNone(bb)
+            self.assertTrue(head_tracker.partial);self.assertTrue(belly_tracker.partial)
+            state.step(hb,belly_tracker.frames,240,now=i*.05)
+            if belly_tracker.frames >= 5 and belly_tracker.frames < 7:
+                self.assertLess(belly_tracker.stable_frames,5)
+        self.assertEqual(state.phase,'BELLY')
+        self.assertEqual(state.angle,129)

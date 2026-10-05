@@ -14,7 +14,7 @@ from ball_debug import PatchTracker
 from dual_kick import camera_settings
 from kick_shapes import Box
 from goal_debug import GoalTracker
-from walk_kick import WalkKick, MIN_BALL_SCORE
+from walk_kick import WalkKick, MIN_BALL_SCORE, MIN_PARTIAL_SCORE
 
 BODY_SERIAL_PORT = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0"
 # 修改这里即可调整本流程的初始位置和接管后的回正位置。
@@ -149,6 +149,8 @@ class Handover:
                 self.phase = 'BELLY'
                 self.angle = self.forward
                 return self.forward
+            # 确认交接时暂停追头，避免低头动作把交接计数又清零。
+            return None
         else: self.confirm = 0
         direction = 1 if cy is not None and cy > .65 else -1 if cy is not None and cy < .35 else 0
         if direction == 0:
@@ -245,10 +247,15 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
             # target decisions while the belly continues to track throughout.
             hb = None if head_busy or state.phase != 'HEAD' else ht.update(hf)
             bb = bt.update(bf)
-            if ht.score < MIN_BALL_SCORE: hb = None
-            if bt.score < MIN_BALL_SCORE: bb = None
+            head_partial = getattr(ht,'partial',False)
+            belly_partial = getattr(bt,'partial',False)
+            head_minimum = MIN_PARTIAL_SCORE if head_partial else MIN_BALL_SCORE
+            belly_minimum = MIN_PARTIAL_SCORE if belly_partial else MIN_BALL_SCORE
+            if ht.score < head_minimum: hb = None
+            if bt.score < belly_minimum: bb = None
             if enabled and not head_busy:
-                angle = state.step(hb,bt.stable_frames if bb is not None else 0,hf.shape[0])
+                # 交接看连续识别次数；半球进画面时大小变化，不要求位置已静止。
+                angle = state.step(hb,bt.frames if bb is not None else 0,hf.shape[0])
                 if angle is not None:
                     if state.phase == 'HEAD':
                         servo.begin_vertical(angle,settle_seconds=settle)
@@ -298,14 +305,15 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                 cv2.putText(display,body.reason if actions else 'NO WALK / NO KICK',(8,48),0,.5,(255,255,255),1)
                 tracker = ht if name == 'head' else bt
                 cv2.putText(display,tracker.reason,(8,116),0,.43,(255,255,255),1)
-                cv2.putText(display,f'shape score={tracker.score:.2f} minimum={MIN_BALL_SCORE:.2f}',
+                minimum = head_minimum if name == 'head' else belly_minimum
+                cv2.putText(display,f'shape score={tracker.score:.2f} minimum={minimum:.2f}',
                             (8,204),0,.43,(255,255,255),1)
                 cv2.putText(display,'R=new search; S=head ROI; B=belly ROI; drag then ENTER',(8,138),0,.43,(255,255,255),1)
                 cv2.putText(display,timing+(' HEAD MOVING' if head_busy else ''),(8,160),0,.43,(255,255,255),1)
                 camera = head if name == 'head' else belly
                 cv2.putText(display,f'capture={camera.stream_status()}',(8,182),0,.43,(255,255,255),1)
                 if name == 'belly':
-                    cv2.putText(display,f'ball stable={bt.stable_frames}/5; aim at center band',
+                    cv2.putText(display,f'seen={bt.frames}/5 stable={bt.stable_frames}/5; aim at center band',
                                 (8,72),0,.43,(255,255,255),1)
                 cv2.imshow(name,display)
             key = cv2.waitKey(1)&255
@@ -365,7 +373,8 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                                  view['flip'],
                                  head_score=ht.score,belly_score=bt.score,ambiguous=ambiguous,
                                  goal=goal.normalized(hf.shape) if goal is not None else None,
-                                 goal_stable=gt.stable_frames,head_flip=settings['head']['flip'])
+                                 goal_stable=gt.stable_frames,head_flip=settings['head']['flip'],
+                                 head_partial=head_partial,belly_partial=belly_partial)
             if action == 'STOP':
                 print('Body stopped:',body.reason)
                 return False

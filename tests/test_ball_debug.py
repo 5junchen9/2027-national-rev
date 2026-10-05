@@ -315,3 +315,20 @@ class BallDebugTests(unittest.TestCase):
         self.assertGreater(box[2],60)
         self.assertTrue(tracker.color_learned)
         self.assertAlmostEqual(tracker.hue,62,delta=1)
+
+    def test_each_camera_can_track_its_half_of_the_ball(self):
+        for y in (0,239):
+            frame=np.zeros((240,320,3),np.uint8)
+            cv2.circle(frame,(160,y),30,(0,240,210),-1)
+            tracker=PatchTracker()
+            for _ in range(5): box=tracker.update(frame)
+            self.assertIsNotNone(box)
+            self.assertTrue(tracker.partial)
+            self.assertGreaterEqual(tracker.frames,5)
+
+    def test_edge_rectangle_does_not_gain_partial_ball_status(self):
+        frame=np.zeros((240,320,3),np.uint8)
+        cv2.rectangle(frame,(100,0),(180,60),(0,240,210),-1)
+        tracker=PatchTracker()
+        self.assertIsNone(tracker.update(frame))
+        self.assertFalse(tracker.partial)

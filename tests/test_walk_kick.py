@@ -181,11 +181,15 @@ class WalkKickTests(unittest.TestCase):
         head.getImage.return_value=belly.getImage.return_value=(True,frame)
         servo.is_moving.return_value=False
         def tracker(box):
-            result=Mock(frames=10,stable_frames=10,score=.8,edges=[],reason='visible region confirmed')
+            result=Mock(frames=10,stable_frames=10,score=.8,partial=False,edges=[],reason='visible region confirmed')
             result.update.return_value=box
             return result
         head_tracker=tracker(None if scenario != 'walk_then_disconnect' else (290,200,60,60))
         belly_tracker=tracker((256,96,128,96) if scenario not in ('walk_then_disconnect','startup_no_ball','search_stop') else None)
+        if scenario == 'partial_handover':
+            belly_tracker.score=.45
+            belly_tracker.partial=True
+            belly_tracker.stable_frames=1
         if scenario == 'walk_then_disconnect':
             def disconnect_after_move(action):
                 head.getImage.side_effect = RuntimeError('USB disconnected')
@@ -204,11 +208,12 @@ class WalkKickTests(unittest.TestCase):
                      'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo),
                      'robotmove':types.SimpleNamespace(RobotMove=robot_factory)}), \
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
-                 patch.object(cv2,'waitKey',return_value=ord('q') if scenario == 'startup_no_ball' else -1), \
+                 patch.object(cv2,'waitKey',side_effect=lambda _: ord('q') if (scenario == 'startup_no_ball'
+                     or (scenario == 'partial_handover' and head.getImage.call_count >= 20)) else -1), \
                  patch.object(handover_debug.time,'monotonic',side_effect=iter(i*.1 for i in range(2000))):
                 if scenario == 'walk':
                     self.assertFalse(handover_debug.run(actions=True))
-                elif scenario == 'startup_no_ball':
+                elif scenario in ('startup_no_ball','partial_handover'):
                     self.assertFalse(handover_debug.run(actions=True))
                 elif scenario == 'search_stop':
                     self.assertFalse(handover_debug.run(actions=True))
@@ -217,8 +222,9 @@ class WalkKickTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError,expected):
                         handover_debug.run(actions=True)
             self.assertEqual(json.loads((root/'config/right_foot_reference.json').read_text()),foot)
-        if scenario == 'startup_no_ball':
+        if scenario in ('startup_no_ball','partial_handover'):
             robot.robotMove.assert_not_called()
+            if scenario == 'partial_handover': servo.begin_vertical.assert_called_once_with(129)
         elif scenario == 'search_stop':
             robot.robotMove.assert_not_called()
             self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[132,135,138])
@@ -252,3 +258,22 @@ class WalkKickTests(unittest.TestCase):
     def test_ball_search_cannot_walk_toward_off_center_goal(self):
         planner=WalkKick();planner.search_stage='VISUAL';planner.search_head_moves=3
         self.assertEqual(self.decide(planner,elapsed=2,goal=Box(.55,.1,.4,.3)),'STOP')
+
+    def test_visible_belly_ball_does_not_trigger_lost_ball_search_when_moving(self):
+        planner=WalkKick()
+        for i in range(50):
+            action=planner.decide('BELLY',None,(256,0,128,60),0,1,(480,640),'0',
+                                  now=planner.started_at+i*.1,belly_score=.45,belly_partial=True)
+            self.assertEqual(action,'WAIT')
+        self.assertEqual(planner.search_stage,'TRACK')
+        self.assertEqual(planner.lost_frames,0)
+
+    def test_low_scoring_full_ball_does_not_receive_partial_threshold(self):
+        planner=WalkKick()
+        for elapsed in (0,.15,.31):
+            action=planner.decide('HEAD',None,(256,0,128,60),0,1,(480,640),'0',
+                                  now=planner.started_at+elapsed,belly_score=.45,belly_partial=False)
+        self.assertEqual(action,'REACQUIRE')
+
+    def test_real_loop_hands_over_partial_ball_without_body_action_or_loss_exit(self):
+        self.run_loop('partial_handover')

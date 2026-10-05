@@ -2,6 +2,7 @@
 import time
 
 MIN_BALL_SCORE = .55
+MIN_PARTIAL_SCORE = .40  # 已通过圆弧筛选的半球使用独立填充阈值。
 
 def enlarged_reference(reference):
     """以原框中心为基准，宽高各增加3%；画面外部分裁掉。"""
@@ -74,7 +75,8 @@ class WalkKick:
 
     def decide(self, phase, head_box, belly_box, head_stable, belly_stable,
                shape, flip, now=None, head_score=1.0,
-               belly_score=1.0, ambiguous=False, goal=None, goal_stable=0, head_flip='0'):
+               belly_score=1.0, ambiguous=False, goal=None, goal_stable=0, head_flip='0',
+               head_partial=False, belly_partial=False):
         now = time.monotonic() if now is None else now
         self.goal_aligned = (goal is not None and goal_stable >= 5
                              and abs(goal.cx-.5) <= max(.025,min(.08,goal.width*.22)))
@@ -83,8 +85,8 @@ class WalkKick:
             return 'STOP'
 
         # 这是颜色区域形状评分，不是经过标定的识别概率。
-        if head_score < MIN_BALL_SCORE: head_box = None
-        if belly_score < MIN_BALL_SCORE: belly_box = None
+        if head_score < (MIN_PARTIAL_SCORE if head_partial else MIN_BALL_SCORE): head_box = None
+        if belly_score < (MIN_PARTIAL_SCORE if belly_partial else MIN_BALL_SCORE): belly_box = None
         if ambiguous:
             return self.search_action(now,ambiguous=True)
 
@@ -92,7 +94,9 @@ class WalkKick:
             if belly_box is not None:
                 self.reset_observation()
                 if belly_stable < 5:
-                    return self.search_action(now)
+                    self.reset_search()
+                    self.reason = 'belly sees ball; wait for handover confirmation'
+                    return 'WAIT'
                 self.reason = 'waiting for belly handover'
                 return 'WAIT'
             if head_box is not None:
@@ -106,9 +110,14 @@ class WalkKick:
             else:
                 return self.search_action(now)
         else:
-            if belly_box is None or belly_stable < 5:
+            if belly_box is None:
                 action = self.search_action(now)
                 return action
+            if belly_stable < 5:
+                self.reset_search()
+                self.reset_observation()
+                self.reason = 'belly ball visible but moving; hold body'
+                return 'WAIT'
             self.reset_search()
             # 腹部接管后：头部看门，腹部看球；两个相机各自按中心对齐。
             # 这是二维近似，不把不同相机的像素坐标直接相减。

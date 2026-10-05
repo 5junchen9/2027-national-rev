@@ -12,6 +12,32 @@ from dual_kick import camera_settings
 from roboteye import RobotEye
 
 
+def fit_visible_arc(contour, shape):
+    """丢掉画面截断的直边，只用可见圆弧估计球心和半径。"""
+    height,width = shape[:2]
+    points = contour.reshape(-1,2).astype(float)
+    points = points[(points[:,0] > 3)&(points[:,0] < width-4)
+                    &(points[:,1] > 3)&(points[:,1] < height-4)]
+    if len(points) < 6:
+        return None
+    x,y = points[:,0],points[:,1]
+    matrix = np.column_stack((2*x,2*y,np.ones(len(points))))
+    cx,cy,c = np.linalg.lstsq(matrix,x*x+y*y,rcond=None)[0]
+    squared_radius = cx*cx+cy*cy+c
+    if squared_radius <= 0:
+        return None
+    radius = float(np.sqrt(squared_radius))
+    if not 6 <= radius <= max(width,height)*.6:
+        return None
+    error = np.abs(np.hypot(x-cx,y-cy)-radius)
+    angles = np.sort(np.arctan2(y-cy,x-cx))
+    gaps = np.diff(np.r_[angles,angles[0]+2*np.pi])
+    arc = 2*np.pi-max(gaps)
+    if arc < np.pi/3 or np.percentile(error,80)/radius > .12:
+        return None
+    return cx,cy,radius
+
+
 class PatchTracker:
     """Yellow-green region detection, including frame-clipped balls; no template identity claim."""
     def __init__(self):
@@ -35,6 +61,7 @@ class PatchTracker:
         self.velocity = (0.0,0.0)
         self.seen_at = None
         self.searching = False
+        self.partial = False
 
     def begin_search(self):
         """保留颜色，重新搜位置；候选按形状评分选择。"""
@@ -45,6 +72,7 @@ class PatchTracker:
         self.velocity = (0.0,0.0)
         self.seen_at = None
         self.searching = True
+        self.partial = False
         self.reason = 'visual search: selecting highest shape score'
 
     def notify_body_move(self):
@@ -160,17 +188,22 @@ class PatchTracker:
         self.mask = cv2.morphologyEx(self.mask,cv2.MORPH_CLOSE,np.ones((close_size,close_size),np.uint8))
         contours,_ = cv2.findContours(self.mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
         candidates = []
+        partial_boxes = set()
         outside_lock = False
         for contour in contours:
             area = cv2.contourArea(contour)
             x,y,w,h = cv2.boundingRect(contour)
+            margin = max(3,min(12,round(max(w,h)*.03)))
+            clipped = (x <= margin or y <= margin or x+w >= frame.shape[1]-margin
+                       or y+h >= frame.shape[0]-margin)
+            arc = fit_visible_arc(contour,frame.shape) if clipped else None
             if (min(w,h) < 8 or area < 70 or area/(w*h) < .35
                     or w*h > frame.shape[0]*frame.shape[1]*.85):
                 continue
             hull = cv2.convexHull(contour)
             hull_area = cv2.contourArea(hull)
             # White seams damage raw perimeter, but do not change the ball's outer shape.
-            if hull_area <= 0 or area/hull_area < .70:
+            if hull_area <= 0 or area/hull_area < (.60 if arc is not None else .70):
                 continue
             hint_fraction = np.count_nonzero(green[y:y+h,x:x+w])/(w*h)
             if hint_fraction < .05:
@@ -179,9 +212,9 @@ class PatchTracker:
                         or max(w,h)/min(w,h) > 1.35):
                     continue  # A white paper rectangle is not a recovered pale ball.
             # Full candidates must be round-ish; clipped candidates can be only a cap.
-            clipped = x <= 2 or y <= 2 or x+w >= frame.shape[1]-2 or y+h >= frame.shape[0]-2
             selected = self.manual and self.overlap((x,y,w,h)) >= .3
-            if not clipped and not selected:
+            # 圆弧不足时仍可走原来的整球外形筛选，不放宽矩形背景。
+            if (not clipped or arc is None) and not selected:
                 perimeter = cv2.arcLength(hull,True)
                 if (area/hull_area < .75 or not perimeter
                         or 4*np.pi*hull_area/(perimeter*perimeter) < .65
@@ -204,8 +237,10 @@ class PatchTracker:
                     if (abs(dx) > limit if self.pitch_changed else np.hypot(dx,dy) > limit):
                         outside_lock = True
                         continue
-                    if not .45 <= w/lw <= 2.2: continue
+                    if not (.25 if arc is not None else .45) <= w/lw <= 2.2: continue
             candidates.append(((x,y,w,h),area/(w*h)))
+            if arc is not None:
+                partial_boxes.add((x,y,w,h))
         count = len(candidates)
         if candidates:
             # score 是轮廓面积 / 包围框面积，不是识别概率。
@@ -220,6 +255,7 @@ class PatchTracker:
                 if result is None: self.hue = original_hue
                 return result
             self.box = None; self.frames = 0; self.score = 0.0; self.edges = []
+            self.partial = False
             self.stable_frames = 0
             self.missing += 1
             self.reason = ('outside target lock: R or select ball' if outside_lock and count == 0
@@ -227,6 +263,7 @@ class PatchTracker:
                            else f'{count} competing color regions: select ball')
             return None
         self.box,self.score = candidates[0]
+        self.partial = self.box in partial_boxes
         x,y,w,h = self.box
         stable = False
         if self.last_box is not None and not self.seeded and self.missing == 0:
@@ -265,7 +302,8 @@ class PatchTracker:
                     self.color_learned = True
                 elif self.stable_frames >= 3:
                     self.hue = round(.8*self.hue+.2*measured)
-        self.reason = 'visible region; confirming' if self.frames < 5 else 'visible region confirmed'
+        self.reason = 'partial ball arc' if self.partial else 'visible region'
+        self.reason += '; confirming' if self.frames < 5 else ' confirmed'
         if self.stable_frames >= 5:
             self.searching = False
         x,y,w,h = self.box
