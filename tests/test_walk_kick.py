@@ -13,7 +13,6 @@ import robotmove
 from handover_debug import Handover, foot_match_details
 from dual_kick import camera_settings
 from walk_kick import WalkKick, enlarged_reference
-from kick_shapes import Box
 
 
 class WalkKickTests(unittest.TestCase):
@@ -38,14 +37,12 @@ class WalkKickTests(unittest.TestCase):
         controller.close.assert_called_once()
 
     def decide(self, planner, head=None, belly=None, phase='HEAD', ready=0, match=None, flip='0',
-               elapsed=0,head_score=1.0,belly_score=1.0,ambiguous=False,
-               goal=Box(.3,.1,.4,.3),goal_stable=5,head_flip='0'):
+               elapsed=0,head_score=1.0,belly_score=1.0,ambiguous=False):
         if match is None:
             match = foot_match_details(belly,(480,640),self.reference,[])
         return planner.decide(phase,head,belly,5,5,(480,640),flip,
                               now=planner.started_at+elapsed,head_score=head_score,
-                              belly_score=belly_score,ambiguous=ambiguous,goal=goal,
-                              goal_stable=goal_stable,head_flip=head_flip)
+                              belly_score=belly_score,ambiguous=ambiguous)
 
     def setUp(self):
         self.reference = dict(visible_patch_box=[.2,.2,.2,.2])
@@ -110,7 +107,7 @@ class WalkKickTests(unittest.TestCase):
             for _ in range(5): action=self.decide(planner,head=box)
             self.assertEqual(action,expected)
 
-    def test_centered_goal_and_ball_keep_walking_without_kick(self):
+    def test_centered_ball_keeps_walking_without_kick(self):
         planner=WalkKick()
         for _ in range(5): action=self.decide(planner,belly=(256,96,128,96),phase='BELLY',ready=100)
         self.assertEqual(action,'UP_LITTLE')
@@ -121,24 +118,17 @@ class WalkKickTests(unittest.TestCase):
         for _ in range(5): action=self.decide(planner,belly=(200,70,240,200),phase='BELLY')
         self.assertEqual(action,'UP_LITTLE')
 
-    def test_goal_missing_or_unstable_holds_and_clears_old_action(self):
+    def test_belly_ball_alone_is_enough_to_walk_and_never_turn(self):
         planner=WalkKick()
-        for _ in range(4): self.decide(planner,belly=(256,96,128,96),phase='BELLY')
-        self.assertEqual(self.decide(planner,belly=(256,96,128,96),phase='BELLY',goal=None),'WAIT')
-        self.assertEqual(planner.confirm_frames,0)
-        self.assertEqual(self.decide(planner,belly=(256,96,128,96),phase='BELLY',goal_stable=4),'WAIT')
+        for _ in range(5): action=self.decide(planner,belly=(288,110,64,48),phase='BELLY')
+        self.assertEqual(action,'UP_LITTLE')
+        for box in ((40,100,60,60),(500,100,60,60)):
+            for _ in range(5): action=self.decide(planner,belly=box,phase='BELLY')
+            self.assertIn(action,('SIDE_LEFT','SIDE_RIGHT'))
 
-    def test_goal_turn_precedes_ball_alignment_and_uses_head_flip(self):
-        for flip,expected in [('0','TURN_RIGHT'),('1','TURN_LEFT')]:
-            planner=WalkKick()
-            for _ in range(5):
-                action=self.decide(planner,belly=(40,96,128,96),phase='BELLY',
-                                   goal=Box(.55,.1,.4,.3),head_flip=flip)
-            self.assertEqual(action,expected)
-
-    def test_lost_ball_cannot_blind_walk_without_goal(self):
+    def test_lost_ball_cannot_blind_walk(self):
         planner=WalkKick();planner.search_stage='VISUAL';planner.search_head_moves=3
-        self.assertEqual(self.decide(planner,elapsed=2,goal=None),'LOWER_HEAD')
+        self.assertEqual(self.decide(planner,elapsed=2),'LOWER_HEAD')
         self.assertEqual(planner.blind_steps,0)
 
     def test_action_count_stops_body_but_elapsed_time_does_not_stop_search(self):
@@ -160,13 +150,13 @@ class WalkKickTests(unittest.TestCase):
     def test_handover_before_any_fixed_down_position(self):
         state=Handover(dict(forward=121,handover=127,down_sign=1,bounds=[85,137]))
         for _ in range(2): self.assertIsNone(state.step(None,5,480))
-        self.assertEqual(state.step(None,5,480),121)
+        self.assertIsNone(state.step(None,5,480))
         self.assertEqual(state.phase,'BELLY')
 
     def test_belly_can_take_over_when_head_still_sees_centered_ball(self):
         state=Handover(dict(forward=129,down_sign=1,bounds=[85,137]))
         for _ in range(3): angle=state.step((290,200,60,60),5,480)
-        self.assertEqual(angle,129)
+        self.assertIsNone(angle)
         self.assertEqual(state.phase,'BELLY')
 
     def run_loop(self, scenario):
@@ -185,8 +175,9 @@ class WalkKickTests(unittest.TestCase):
             result=Mock(frames=10,stable_frames=10,score=.8,partial=False,edges=[],reason='visible region confirmed')
             result.update.return_value=box
             return result
-        head_tracker=tracker(None if scenario != 'walk_then_disconnect' else (290,200,60,60))
-        belly_tracker=tracker((256,96,128,96) if scenario not in ('walk_then_disconnect','startup_no_ball','search_stop','lock_recovery') else None)
+        head_tracker=tracker((290,200,60,60) if scenario in ('walk_then_disconnect','visible_head_unstable') else None)
+        if scenario == 'visible_head_unstable': head_tracker.stable_frames=1
+        belly_tracker=tracker((256,96,128,96) if scenario not in ('walk_then_disconnect','startup_no_ball','search_stop','lock_recovery','visible_head_unstable') else None)
         if scenario == 'lock_recovery':
             head_tracker.reason='outside target lock: retry=3/3 confirm=1/3'
         if scenario == 'partial_handover':
@@ -205,19 +196,19 @@ class WalkKickTests(unittest.TestCase):
             with patch.object(handover_debug,'ROOT',root), \
                  patch.object(handover_debug,'RobotEye',side_effect=[head,belly]), \
                  patch.object(handover_debug,'PatchTracker',side_effect=[head_tracker,belly_tracker]), \
-                 patch('goal_debug.find_goal_frames',return_value=[Box(192,60,256,180)]), \
                  patch.dict('sys.modules',{
                      'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo),
                      'robotmove':types.SimpleNamespace(RobotMove=robot_factory)}), \
+                 patch('goal_debug.GoalTracker',side_effect=AssertionError('goal detection removed')), \
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=lambda _: ord('q') if (scenario == 'startup_no_ball'
-                     or (scenario == 'partial_handover' and head.getImage.call_count >= 20)
+                     or (scenario in ('partial_handover','visible_head_unstable') and head.getImage.call_count >= 20)
                      or (scenario == 'search_stop' and servo.begin_vertical.call_count >= 10)
                      or (scenario == 'lock_recovery' and head_tracker.begin_search.call_count+belly_tracker.begin_search.call_count >= 1)) else -1), \
                  patch.object(handover_debug.time,'monotonic',side_effect=iter(i*.1 for i in range(10000))):
                 if scenario == 'walk':
                     self.assertFalse(handover_debug.run(actions=True))
-                elif scenario in ('startup_no_ball','partial_handover','lock_recovery'):
+                elif scenario in ('startup_no_ball','partial_handover','lock_recovery','visible_head_unstable'):
                     self.assertFalse(handover_debug.run(actions=True))
                 elif scenario == 'search_stop':
                     self.assertFalse(handover_debug.run(actions=True))
@@ -226,9 +217,9 @@ class WalkKickTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError,expected):
                         handover_debug.run(actions=True)
             self.assertEqual(json.loads((root/'config/right_foot_reference.json').read_text()),foot)
-        if scenario in ('startup_no_ball','partial_handover','lock_recovery'):
+        if scenario in ('startup_no_ball','partial_handover','lock_recovery','visible_head_unstable'):
             robot.robotMove.assert_not_called()
-            if scenario == 'partial_handover': servo.begin_vertical.assert_called_once_with(129)
+            if scenario in ('partial_handover','visible_head_unstable'): servo.begin_vertical.assert_not_called()
             if scenario == 'lock_recovery':
                 head_tracker.begin_search.assert_not_called()
                 belly_tracker.begin_search.assert_called_once()
@@ -262,10 +253,6 @@ class WalkKickTests(unittest.TestCase):
     def test_serial_failure_during_walk_does_not_retry(self):
         self.run_loop('walk_failure')
 
-    def test_ball_search_cannot_walk_toward_off_center_goal(self):
-        planner=WalkKick();planner.search_stage='VISUAL';planner.search_head_moves=3
-        self.assertEqual(self.decide(planner,elapsed=2,goal=Box(.55,.1,.4,.3)),'LOWER_HEAD')
-
     def test_visible_belly_ball_does_not_trigger_lost_ball_search_when_moving(self):
         planner=WalkKick()
         for i in range(50):
@@ -290,3 +277,6 @@ class WalkKickTests(unittest.TestCase):
 
     def test_automatic_visual_search_preserves_pending_position_confirmation(self):
         self.run_loop('lock_recovery')
+
+    def test_visible_unstable_head_ball_stops_head_search_without_body_action(self):
+        self.run_loop('visible_head_unstable')

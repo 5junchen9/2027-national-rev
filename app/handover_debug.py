@@ -1,10 +1,8 @@
-"""双摄跟踪与交接；--actions 启用对齐球门并行走带球。"""
+"""双摄跟踪与交接；--actions 启用对齐球并行走带球。"""
 from contextlib import ExitStack
 import argparse
-from collections import deque
 import json
 import math
-from statistics import median
 import time
 
 import cv2
@@ -12,12 +10,10 @@ from robot_config import ROOT
 from roboteye import RobotEye
 from ball_debug import PatchTracker
 from dual_kick import camera_settings
-from kick_shapes import Box
-from goal_debug import GoalTracker
 from walk_kick import WalkKick, MIN_BALL_SCORE
 
 BODY_SERIAL_PORT = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0"
-# 修改这里即可调整本流程的初始位置和接管后的回正位置。
+# 修改这里即可调整本流程的初始位置。
 INITIAL_HEAD_POSITION = 129
 
 
@@ -119,63 +115,17 @@ class Handover:
         # 取消旧标定的低头终点（137），保留底层驱动指令范围。
         self.down = 180 if self.direction == 1 else 85
         self.up_limit = max(85,bounds[0]) if self.direction == 1 else min(180,bounds[1])
-        self.follow_direction = 0
-        self.follow_confirm = 0
         self.confirm = 0
-        self.positions = deque(maxlen=3)
-        self.follow_since = None
-        self.last_move_at = -math.inf
-        self.last_move_direction = 0
 
     def reset_follow(self):
-        self.positions.clear()
-        self.follow_direction = self.follow_confirm = 0
-        self.follow_since = None
         self.confirm = 0
 
     def step(self, head_box, belly_frames, height, now=None):
+        # 看见球就保持当前头位；交接只改变控制相机，不抬头回正。
         if self.phase != 'HEAD': return None
-        now = time.monotonic() if now is None else now
-        if head_box is not None:
-            self.positions.append((head_box[1]+head_box[3]/2)/height)
-            cy = median(self.positions)
-        else:
-            self.positions.clear()
-            cy = None
-        # 腹部稳定接住近处球即可交接，不要求头部先到固定角度。
-        if belly_frames >= 5:
-            self.confirm += 1
-            if self.confirm >= 3:
-                self.phase = 'BELLY'
-                self.angle = self.forward
-                return self.forward
-            # 确认交接时暂停追头，避免低头动作把交接计数又清零。
-            return None
-        else: self.confirm = 0
-        direction = 1 if cy is not None and cy > .65 else -1 if cy is not None and cy < .35 else 0
-        if direction == 0:
-            self.follow_direction = self.follow_confirm = 0
-            self.follow_since = None
-            return None
-        if direction != self.follow_direction:
-            self.follow_since = now
-        self.follow_confirm = self.follow_confirm+1 if direction == self.follow_direction else 1
-        self.follow_direction = direction
-        # Frame count alone becomes over-sensitive as processing FPS improves.
-        # Require a sustained error and extra time before reversing direction.
-        interval = .4 if self.last_move_direction and direction != self.last_move_direction else .18
-        if (self.follow_confirm < 3 or now-self.follow_since < .10
-                or now-self.last_move_at < interval): return None
-        low,high = sorted((self.up_limit,self.down))
-        # Larger image error takes 2-3 units; close to center stays at one unit.
-        units = min(3,max(1,round(abs(cy-.5)*8)))
-        candidate = max(low,min(high,self.angle+direction*self.direction*units))
-        if low <= candidate <= high and candidate != self.angle:
-            self.angle = candidate
-            self.last_move_at = now
-            self.last_move_direction = direction
-            self.reset_follow()
-            return candidate
+        self.confirm = self.confirm+1 if belly_frames >= 5 else 0
+        if self.confirm >= 3:
+            self.phase = 'BELLY'
         return None
 
 
@@ -192,15 +142,13 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
     state = Handover(head_profile)
     body = WalkKick() if actions else None
     ht,bt = PatchTracker(),PatchTracker()
-    gt = GoalTracker()
     for key in ('hue','hue_width','min_s','min_v'): setattr(bt,key,foot['color'][key])
-    print(f'Startup/return={forward}; head command limits={sorted((state.up_limit,state.down))}; requested FPS={fps}.')
-    print('Smoothed ball feedback: below 65%=lower, above 35%=raise; center/lost=hold.')
-    print(f'1-3 units after >=3 frames and 0.10s; interval>=0.18s; reverse>=0.4s; settle={settle}s.')
-    print('GOAL ALIGN + WALK enabled; no kick action.' if actions else 'Head only; no body serial, walking or kick.')
+    print(f'Startup head={forward}; head command limits={sorted((state.up_limit,state.down))}; requested FPS={fps}.')
+    print('Ball visible: hold current head pose, even before position is stable.')
+    print('BALL ALIGN + WALK enabled; no kick action.' if actions else 'Head only; no body serial, walking or kick.')
     if actions: print('Fixed robot serial:',BODY_SERIAL_PORT)
     print('G=restart head phase; R=unlock trackers; Q=quit. Belly ball follows image center.')
-    print('Align goal and ball, walk one action, then observe again.' if actions else 'Move ball by hand from head view into belly view.')
+    print('Align ball, walk one action, then observe again.' if actions else 'Move ball by hand from head view into belly view.')
     if actions: print('Loss recovery: visual search -> repeat 4 down / 4 up head moves, 1.5s per pose; Q to quit.')
     print('Saved calibrations are read, not overwritten.')
     print('S=select HEAD ball; B=select BELLY ball. Drag a green ball region, ENTER=confirm, C=cancel.')
@@ -245,31 +193,20 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
             detect_at = time.monotonic()
             # Moving-camera frames are for preview; use settled frames for
             # target decisions while the belly continues to track throughout.
-            hb = None if head_busy or state.phase != 'HEAD' else ht.update(hf)
+            hb = ht.update(hf)
             bb = bt.update(bf)
             if ht.score < MIN_BALL_SCORE: hb = None
             if bt.score < MIN_BALL_SCORE: bb = None
-            if enabled and not head_busy:
-                # 交接看连续识别次数；半球进画面时大小变化，不要求位置已静止。
-                angle = state.step(hb,bt.frames if bb is not None else 0,hf.shape[0])
-                if angle is not None:
-                    if state.phase == 'HEAD':
-                        servo.begin_vertical(angle,settle_seconds=settle)
-                    else:
-                        servo.begin_vertical(angle)
-                    head_busy = True
-                    ht.notify_pitch_change()  # Keep horizontal identity gate when head tilts.
-                    print('Head:',angle,'phase:',state.phase)
-                    if state.phase == 'BELLY':
-                        print('Belly took over; head returned to forward pose.')
-            status = 'ALIGN GOAL + BALL' if state.phase == 'BELLY' else 'HEAD FOLLOW'
+            if enabled:
+                old_phase = state.phase
+                state.step(hb,bt.frames if bb is not None else 0,hf.shape[0])
+                if old_phase != state.phase:
+                    print('Belly took over; keeping current head pose.')
+                if state.phase == 'BELLY' and bb is None and hb is not None:
+                    state.phase = 'HEAD'
+                    state.reset_follow()
+            status = 'BELLY BALL FOLLOW' if state.phase == 'BELLY' else 'HEAD FOLLOW'
             if not enabled: status = 'G TO ENABLE HEAD'
-            # 俯仰移动中不确认球门；腹部接管后头部回正，持续看门。
-            goal = None
-            if not head_busy:
-                goal = gt.update(hf)
-            else:
-                gt.reset()
             detect_total += time.monotonic()-detect_at
             measured_frames += 1
             elapsed = time.monotonic()-measured_at
@@ -288,11 +225,8 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                     width,height = frame.shape[1],frame.shape[0]
                     for fraction in (.42,.5,.58):
                         cv2.line(display,(round(width*fraction),0),(round(width*fraction),height-1),(255,0,255),1)
-                if name == 'head' and isinstance(goal,Box):
-                    cv2.rectangle(display,(int(goal.x),int(goal.y)),(int(goal.x+goal.width),int(goal.bottom)),(255,255,0),2)
                 if name == 'head':
                     cv2.line(display,(frame.shape[1]//2,0),(frame.shape[1]//2,frame.shape[0]-1),(255,255,0),1)
-                    cv2.putText(display,f'{gt.reason} stable={gt.stable_frames}/5',(8,226),0,.43,(255,255,0),1)
                 if name == 'head' and state.phase == 'HEAD':
                     for fraction in (.35,.65):
                         cv2.line(display,(0,round(frame.shape[0]*fraction)),
@@ -341,7 +275,6 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                     body.reset_search()
                 continue
             if key == ord('g'):
-                gt.reset()
                 state = Handover(head_profile)
                 servo.begin_vertical(state.forward)
                 enabled = True
@@ -351,7 +284,6 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                     body.reset_search()
                 continue
             if key == ord('r'):
-                gt.reset()
                 ht,bt = PatchTracker(),PatchTracker()
                 for name in ('hue','hue_width','min_s','min_v'): setattr(bt,name,foot['color'][name])
                 state.reset_follow()
@@ -367,9 +299,7 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
             action = body.decide(state.phase,hb,bb,ht.stable_frames,bt.stable_frames,
                                  hf.shape[:2] if state.phase == 'HEAD' else bf.shape[:2],
                                  view['flip'],
-                                 head_score=ht.score,belly_score=bt.score,ambiguous=ambiguous,
-                                 goal=goal.normalized(hf.shape) if goal is not None else None,
-                                 goal_stable=gt.stable_frames,head_flip=settings['head']['flip'])
+                                 head_score=ht.score,belly_score=bt.score,ambiguous=ambiguous)
             if action == 'STOP':
                 print('Body stopped:',body.reason)
                 return False
@@ -402,7 +332,6 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
             move.robotMove(action)
             head.discard_frames(1); belly.discard_frames(1)
             ht.notify_body_move(); bt.notify_body_move()
-            gt.reset()
             state.reset_follow()
             body_ready_at = time.monotonic()+.5
 
@@ -412,6 +341,6 @@ if __name__ == '__main__':
     parser.add_argument('--forward',type=int,default=INITIAL_HEAD_POSITION)
     parser.add_argument('--fps',type=float,default=30)
     parser.add_argument('--settle',type=float,default=.18,help='small tracking move settling time, seconds')
-    parser.add_argument('--actions',action='store_true',help='enable goal alignment and walking; no kick action')
+    parser.add_argument('--actions',action='store_true',help='enable ball alignment and walking; no kick action')
     args = parser.parse_args()
     raise SystemExit(0 if run(args.forward,args.fps,args.settle,args.actions) else 1)

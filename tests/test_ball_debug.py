@@ -14,6 +14,12 @@ class BallDebugTests(unittest.TestCase):
             tracker=PatchTracker()
             for _ in range(6): self.assertIsNone(tracker.update(frame))
 
+    def test_round_green_floor_patch_with_little_contrast_is_rejected(self):
+        frame=np.full((240,320,3),(60,150,100),np.uint8)
+        cv2.circle(frame,(160,120),55,(63,157,104),-1)
+        tracker=PatchTracker();tracker.hue=47;tracker.color_learned=True
+        for _ in range(6): self.assertIsNone(tracker.update(frame))
+
     def test_half_balls_on_each_frame_edge_pass_arc_check(self):
         for center in ((160,0),(160,239),(0,120),(319,120)):
             frame=np.zeros((240,320,3),np.uint8)

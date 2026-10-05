@@ -14,61 +14,18 @@ from dual_kick import camera_settings
 
 
 class HandoverTests(unittest.TestCase):
-    def test_head_passes_old_down_limit_and_returns_after_belly_confirmation(self):
-        s = Handover(dict(forward=119,handover=129,down_sign=1,bounds=[85,137]))
-        self.assertIsNone(s.step(None,0,480))
-        below=(100,350,40,40)
-        angles = [value for i in range(150) if (value:=s.step(below,0,480,now=i*.2)) is not None]
-        self.assertEqual(angles,list(range(121,180,2))+[180])
-        self.assertIsNone(s.step(None,0,480))
-        self.assertIsNone(s.step(None,5,480))
-        self.assertIsNone(s.step(None,5,480))
-        self.assertEqual(s.step(None,5,480),119)
-        self.assertEqual(s.phase,'BELLY')
-        self.assertIsNone(s.step(None,5,480))
+    def test_any_visible_ball_keeps_head_pose_even_before_stable(self):
+        state=Handover(dict(forward=129,down_sign=1,bounds=[85,137]))
+        for i,box in enumerate(((100,420,40,40),(100,30,40,40),None)*10):
+            self.assertIsNone(state.step(box,0,480,now=i*.2))
+            self.assertEqual(state.angle,129)
 
-    def test_center_and_lost_ball_do_not_continue_down_sequence(self):
-        s=Handover(dict(forward=117,handover=127,down_sign=1,bounds=[85,137]))
-        for i in range(3): s.step((100,350,40,40),0,480,now=i*.25)
-        self.assertEqual(s.angle,119)
-        # Allow the short median window to replace old off-center measurements.
-        for i in range(3): s.step((100,220,40,40),0,480,now=.6+i*.01)
-        for _ in range(20): self.assertIsNone(s.step((100,220,40,40),0,480))
-        for _ in range(20): self.assertIsNone(s.step(None,0,480))
-        self.assertEqual(s.angle,119)
-        self.assertEqual(s.phase,'HEAD')
-
-    def test_upward_ball_raises_head_and_jitter_does_not_move(self):
-        s=Handover(dict(forward=117,handover=127,down_sign=1,bounds=[85,137]))
-        for i in range(3): s.step((100,60,40,40),0,480,now=i*.25)
-        self.assertEqual(s.angle,114)
-        for i,box in enumerate([(100,350,40,40),(100,60,40,40)]*10):
-            self.assertIsNone(s.step(box,0,480,now=1+i*.1))
-        self.assertEqual(s.angle,114)
-
-    def test_fast_frames_and_single_outlier_do_not_trigger_moves(self):
-        s=Handover(dict(forward=117,handover=127,down_sign=1,bounds=[85,137]))
-        for i in range(3): self.assertIsNone(s.step((100,350,40,40),0,480,now=i*.02))
-        s.reset_follow()
-        center=(100,220,40,40)
-        for i in range(5): s.step(center,0,480,now=.1+i*.1)
-        self.assertIsNone(s.step((100,60,40,40),0,480,now=.7))
-        self.assertEqual(s.angle,117)
-
-    def test_reverse_direction_waits_but_can_respond_within_half_second(self):
-        s=Handover(dict(forward=117,handover=127,down_sign=1,bounds=[85,137]))
-        for i in range(3): s.step((100,350,40,40),0,480,now=i*.06)
-        self.assertEqual(s.angle,119)
-        for i in range(5):
-            self.assertIsNone(s.step((100,60,40,40),0,480,now=.18+i*.06))
-        self.assertEqual(s.step((100,60,40,40),0,480,now=.53),116)
-
-    def test_fast_follow_clamps_at_down_limit_and_does_not_move_on_loss(self):
-        s=Handover(dict(forward=119,handover=129,down_sign=1,bounds=[85,137]))
-        for i in range(240): s.step((100,420,40,40),0,480,now=i/30)
-        self.assertEqual(s.angle,180)  # 底层指令上限，旧137不再限制。
-        for i in range(30): self.assertIsNone(s.step(None,0,480,now=1+i/30))
-        self.assertEqual(s.angle,180)
+    def test_belly_handover_preserves_searched_head_pose(self):
+        state=Handover(dict(forward=129,down_sign=1,bounds=[85,137]))
+        state.angle=141
+        for _ in range(3): self.assertIsNone(state.step(None,5,480))
+        self.assertEqual(state.phase,'BELLY')
+        self.assertEqual(state.angle,141)
 
     def test_saved_partial_box_matches_but_missing_ball_or_wrong_position_does_not(self):
         ref=dict(visible_patch_box=[25/640,0,257/640,249/480],clipped_edges=['top'])
@@ -160,7 +117,7 @@ class HandoverTests(unittest.TestCase):
                  patch.object(cv2,'waitKey',side_effect=[-1,-1,-1,-1,ord('q')]):
                 self.assertTrue(handover_debug.run())
         servo.turn_vertical.assert_called_once_with(129)
-        servo.begin_vertical.assert_called_once_with(131,settle_seconds=.18)
+        servo.begin_vertical.assert_not_called()
         self.assertEqual(show.call_count,10)  # Both windows, including moving frames.
         self.assertEqual(belly.getImage.call_count,6)
         head.discard_frames.assert_called_once_with(1)

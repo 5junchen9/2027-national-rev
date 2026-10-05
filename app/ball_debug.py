@@ -54,6 +54,26 @@ def visible_circle_arc(contour, shape):
     return False
 
 
+def distinct_from_background(contour, hsv):
+    """球面应与紧邻外圈有外观差异，排除同一块地面的颜色斑块。"""
+    x,y,w,h = cv2.boundingRect(contour)
+    margin = max(5,round(min(w,h)*.15))
+    left,top = max(0,x-margin),max(0,y-margin)
+    right,bottom = min(hsv.shape[1],x+w+margin),min(hsv.shape[0],y+h+margin)
+    region = hsv[top:bottom,left:right]
+    inside = np.zeros(region.shape[:2],np.uint8)
+    cv2.drawContours(inside,[contour-np.array([left,top])],-1,255,-1)
+    expanded = cv2.dilate(inside,np.ones((margin*2+1,margin*2+1),np.uint8))
+    outside = (expanded > 0)&(inside == 0)
+    if np.count_nonzero(outside) < 20:
+        return False
+    surface = np.median(region[inside > 0],axis=0)
+    surroundings = np.median(region[outside],axis=0)
+    difference = np.abs(surface-surroundings)
+    hue_difference = min(difference[0],180-difference[0])
+    return difference[2] >= 20 or difference[1] >= 25 or hue_difference >= 10
+
+
 class PatchTracker:
     """Yellow-green region detection, including frame-clipped balls; no template identity claim."""
     def __init__(self):
@@ -238,6 +258,8 @@ class PatchTracker:
             hull_area = cv2.contourArea(hull)
             # White seams damage raw perimeter, but do not change the ball's outer shape.
             if hull_area <= 0 or area/hull_area < .70:
+                continue
+            if not distinct_from_background(contour,hsv):
                 continue
             hint_fraction = np.count_nonzero(green[y:y+h,x:x+w])/(w*h)
             if hint_fraction < .05:

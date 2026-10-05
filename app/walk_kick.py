@@ -18,7 +18,6 @@ def enlarged_reference(reference):
 class WalkKick:
     """可靠目标驱动动作；丢球只用头部反复上下搜索。"""
     def __init__(self):
-        self.goal_aligned = False
         self.blind_steps = 0
         self.actions = 0
         self.pending = None
@@ -76,10 +75,8 @@ class WalkKick:
 
     def decide(self, phase, head_box, belly_box, head_stable, belly_stable,
                shape, flip, now=None, head_score=1.0,
-               belly_score=1.0, ambiguous=False, goal=None, goal_stable=0, head_flip='0'):
+               belly_score=1.0, ambiguous=False):
         now = time.monotonic() if now is None else now
-        self.goal_aligned = (goal is not None and goal_stable >= 5
-                             and abs(goal.cx-.5) <= max(.025,min(.08,goal.width*.22)))
         if self.actions >= 30:
             self.reason = '30 body actions limit'
             return 'STOP'
@@ -122,28 +119,15 @@ class WalkKick:
                 self.reason = 'belly ball visible but moving; hold body'
                 return 'WAIT'
             self.reset_search()
-            # 腹部接管后：头部看门，腹部看球；两个相机各自按中心对齐。
-            # 这是二维近似，不把不同相机的像素坐标直接相减。
-            if goal is None or goal_stable < 5:
-                self.reset_observation()
-                self.reason = 'goal missing or unstable; hold body'
-                return 'WAIT'
-            goal_error = goal.cx-.5
-            tolerance = max(.025,min(.08,goal.width*.22))
-            if abs(goal_error) > tolerance:
-                action = 'TURN_RIGHT' if goal_error > 0 else 'TURN_LEFT'
-                if head_flip in ('1', '-1'):
-                    action = 'TURN_LEFT' if action == 'TURN_RIGHT' else 'TURN_RIGHT'
-                self.reason = 'turn toward goal center'
+            # 腹部接管后只根据球的位置横向对齐，再向前行走带球。
+            x,y,width,height = belly_box
+            ball_error = (x+width/2)/shape[1]-.5
+            if abs(ball_error) > .08:
+                action = 'SIDE_LEFT' if ball_error < 0 else 'SIDE_RIGHT'
+                self.reason = 'belly ball: move sideways to align'
             else:
-                x,y,width,height = belly_box
-                ball_error = (x+width/2)/shape[1]-.5
-                if abs(ball_error) > .08:
-                    action = 'SIDE_LEFT' if ball_error < 0 else 'SIDE_RIGHT'
-                    self.reason = 'goal centered; move sideways to align ball'
-                else:
-                    action = 'UP_LITTLE'
-                    self.reason = 'goal and ball centered; walk ball toward goal'
+                action = 'UP_LITTLE'
+                self.reason = 'belly ball centered; walk forward'
 
         if flip in ('1', '-1') and action.startswith('SIDE_'):
             action = 'SIDE_RIGHT' if action == 'SIDE_LEFT' else 'SIDE_LEFT'
