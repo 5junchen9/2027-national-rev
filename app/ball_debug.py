@@ -35,6 +35,9 @@ class PatchTracker:
         self.velocity = (0.0,0.0)
         self.seen_at = None
         self.searching = False
+        self.outside_frames = 0
+        self.recovery_box = None
+        self.recovery_frames = 0
 
     def begin_search(self):
         """保留颜色，重新搜位置；候选按形状评分选择。"""
@@ -45,6 +48,9 @@ class PatchTracker:
         self.velocity = (0.0,0.0)
         self.seen_at = None
         self.searching = True
+        self.outside_frames = 0
+        self.recovery_box = None
+        self.recovery_frames = 0
         self.reason = 'visual search: selecting highest shape score'
 
     def notify_body_move(self):
@@ -52,6 +58,8 @@ class PatchTracker:
         self.begin_search()
 
     def notify_pitch_change(self):
+        self.outside_frames = self.recovery_frames = 0
+        self.recovery_box = None
         self.pitch_changed = True
         self.box = None
         self.frames = self.stable_frames = 0
@@ -98,6 +106,8 @@ class PatchTracker:
         self.stable_frames = 0
         self.velocity = (0.0,0.0)
         self.seen_at = None
+        self.outside_frames = self.recovery_frames = 0
+        self.recovery_box = None
         self.reason = 'color sampled; finding selected region'
 
     def color_profile(self):
@@ -160,6 +170,7 @@ class PatchTracker:
         self.mask = cv2.morphologyEx(self.mask,cv2.MORPH_CLOSE,np.ones((close_size,close_size),np.uint8))
         contours,_ = cv2.findContours(self.mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
         candidates = []
+        outside_candidates = []
         outside_lock = False
         for contour in contours:
             area = cv2.contourArea(contour)
@@ -200,12 +211,36 @@ class PatchTracker:
                 if not self.seeded:
                     limit = max(25,min(60,max(lw,lh)*.65))
                     limit += min(40,np.hypot(shift_x,shift_y)*.35)
+                    if not .45 <= w/lw <= 2.2: continue
                     dx,dy = x+w/2-lx-lw/2-shift_x,y+h/2-ly-lh/2-shift_y
                     if (abs(dx) > limit if self.pitch_changed else np.hypot(dx,dy) > limit):
                         outside_lock = True
+                        outside_candidates.append(((x,y,w,h),area/(w*h)))
                         continue
-                    if not .45 <= w/lw <= 2.2: continue
             candidates.append(((x,y,w,h),area/(w*h)))
+        # 旧位置附近没有合格球时，才允许在更大范围确认新位置。
+        # 连续三帧被位置锁拒绝，再要求同一新候选连续出现三帧。
+        if not candidates and outside_candidates:
+            self.outside_frames += 1
+            if self.outside_frames >= 3:
+                box,score = max(outside_candidates,key=lambda item: (item[1],item[0][2]*item[0][3]))
+                x,y,w,h = box
+                same_target = False
+                if self.recovery_box is not None:
+                    rx,ry,rw,rh = self.recovery_box
+                    same_target = (abs(x+w/2-rx-rw/2) <= max(25,rw*.4)
+                                   and abs(y+h/2-ry-rh/2) <= max(25,rh*.4)
+                                   and .7 <= w/rw <= 1.4 and .7 <= h/rh <= 1.4)
+                self.recovery_frames = self.recovery_frames+1 if same_target else 1
+                self.recovery_box = box
+                if self.recovery_frames >= 3:
+                    candidates.append((box,score))
+                    # 不用旧速度预测新位置；后续仍从第一帧开始确认身体动作。
+                    self.velocity = (0.0,0.0)
+                    self.seen_at = None
+        else:
+            self.outside_frames = self.recovery_frames = 0
+            self.recovery_box = None
         count = len(candidates)
         if candidates:
             # score 是轮廓面积 / 包围框面积，不是识别概率。
@@ -222,10 +257,12 @@ class PatchTracker:
             self.box = None; self.frames = 0; self.score = 0.0; self.edges = []
             self.stable_frames = 0
             self.missing += 1
-            self.reason = ('outside target lock: R or select ball' if outside_lock and count == 0
+            self.reason = (f'outside target lock: retry={self.outside_frames}/3 confirm={self.recovery_frames}/3' if outside_lock and count == 0
                            else 'no ball shape/color: R or select ball' if count == 0
                            else f'{count} competing color regions: select ball')
             return None
+        self.outside_frames = self.recovery_frames = 0
+        self.recovery_box = None
         self.box,self.score = candidates[0]
         x,y,w,h = self.box
         stable = False

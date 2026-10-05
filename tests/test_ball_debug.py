@@ -122,6 +122,63 @@ class BallDebugTests(unittest.TestCase):
         self.assertIsNone(tracker.update(frame))
         self.assertIn('outside target lock',tracker.reason)
 
+    def test_remote_ball_relocks_only_after_repeated_rejection_and_confirmation(self):
+        old=np.zeros((240,640,3),np.uint8)
+        cv2.circle(old,(80,100),25,(0,240,210),-1)
+        new=np.zeros_like(old)
+        cv2.circle(new,(400,180),25,(0,240,210),-1)
+        tracker=PatchTracker()
+        tracker.update(old)
+        old_box=tracker.last_box
+        color=tracker.color_profile()
+        for i in range(4):
+            self.assertIsNone(tracker.update(new))
+            self.assertEqual(tracker.last_box,old_box)
+            self.assertEqual(tracker.frames,0)
+        box=tracker.update(new)
+        self.assertIsNotNone(box)
+        self.assertAlmostEqual(box[0]+box[2]/2,400,delta=2)
+        self.assertEqual(tracker.frames,1)
+        self.assertEqual(tracker.stable_frames,1)
+        self.assertEqual(tracker.color_profile(),color)
+        self.assertEqual(tracker.outside_frames,0)
+
+    def test_changing_remote_candidates_cannot_relock(self):
+        frame=np.zeros((240,640,3),np.uint8)
+        cv2.circle(frame,(80,100),25,(0,240,210),-1)
+        tracker=PatchTracker();tracker.update(frame)
+        old_box=tracker.last_box
+        for i in range(12):
+            frame[:]=0
+            cv2.circle(frame,(350 if i%2 else 550,100),25,(0,240,210),-1)
+            self.assertIsNone(tracker.update(frame))
+        self.assertEqual(tracker.last_box,old_box)
+        self.assertEqual(tracker.recovery_frames,1)
+
+    def test_old_ball_wins_over_remote_candidate_and_cancels_recovery(self):
+        old=np.zeros((240,640,3),np.uint8)
+        cv2.circle(old,(80,100),25,(0,240,210),-1)
+        new=np.zeros_like(old)
+        cv2.circle(new,(400,100),25,(0,240,210),-1)
+        tracker=PatchTracker();tracker.update(old)
+        for _ in range(4): self.assertIsNone(tracker.update(new))
+        box=tracker.update(old|new)
+        self.assertAlmostEqual(box[0]+box[2]/2,80,delta=2)
+        self.assertEqual(tracker.recovery_frames,0)
+        self.assertEqual(tracker.outside_frames,0)
+
+    def test_empty_frame_breaks_remote_confirmation(self):
+        old=np.zeros((240,640,3),np.uint8)
+        cv2.circle(old,(80,100),25,(0,240,210),-1)
+        new=np.zeros_like(old)
+        cv2.circle(new,(400,100),25,(0,240,210),-1)
+        tracker=PatchTracker();tracker.update(old)
+        for _ in range(4): self.assertIsNone(tracker.update(new))
+        self.assertIsNone(tracker.update(np.zeros_like(old)))
+        self.assertEqual(tracker.outside_frames,0)
+        self.assertEqual(tracker.recovery_frames,0)
+        self.assertIsNone(tracker.update(new))
+
     def test_partial_patch_tracks_then_stops_when_lost(self):
         frame = np.zeros((120,160,3),dtype=np.uint8)
         cv2.circle(frame,(70,115),25,(0,240,210),-1)

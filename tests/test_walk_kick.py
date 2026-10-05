@@ -186,7 +186,9 @@ class WalkKickTests(unittest.TestCase):
             result.update.return_value=box
             return result
         head_tracker=tracker(None if scenario != 'walk_then_disconnect' else (290,200,60,60))
-        belly_tracker=tracker((256,96,128,96) if scenario not in ('walk_then_disconnect','startup_no_ball','search_stop') else None)
+        belly_tracker=tracker((256,96,128,96) if scenario not in ('walk_then_disconnect','startup_no_ball','search_stop','lock_recovery') else None)
+        if scenario == 'lock_recovery':
+            head_tracker.reason='outside target lock: retry=3/3 confirm=1/3'
         if scenario == 'partial_handover':
             belly_tracker.score=.8
             belly_tracker.stable_frames=1
@@ -210,11 +212,12 @@ class WalkKickTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=lambda _: ord('q') if (scenario == 'startup_no_ball'
                      or (scenario == 'partial_handover' and head.getImage.call_count >= 20)
-                     or (scenario == 'search_stop' and servo.begin_vertical.call_count >= 10)) else -1), \
+                     or (scenario == 'search_stop' and servo.begin_vertical.call_count >= 10)
+                     or (scenario == 'lock_recovery' and head_tracker.begin_search.call_count+belly_tracker.begin_search.call_count >= 1)) else -1), \
                  patch.object(handover_debug.time,'monotonic',side_effect=iter(i*.1 for i in range(10000))):
                 if scenario == 'walk':
                     self.assertFalse(handover_debug.run(actions=True))
-                elif scenario in ('startup_no_ball','partial_handover'):
+                elif scenario in ('startup_no_ball','partial_handover','lock_recovery'):
                     self.assertFalse(handover_debug.run(actions=True))
                 elif scenario == 'search_stop':
                     self.assertFalse(handover_debug.run(actions=True))
@@ -223,9 +226,12 @@ class WalkKickTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError,expected):
                         handover_debug.run(actions=True)
             self.assertEqual(json.loads((root/'config/right_foot_reference.json').read_text()),foot)
-        if scenario in ('startup_no_ball','partial_handover'):
+        if scenario in ('startup_no_ball','partial_handover','lock_recovery'):
             robot.robotMove.assert_not_called()
             if scenario == 'partial_handover': servo.begin_vertical.assert_called_once_with(129)
+            if scenario == 'lock_recovery':
+                head_tracker.begin_search.assert_not_called()
+                belly_tracker.begin_search.assert_called_once()
         elif scenario == 'search_stop':
             robot.robotMove.assert_not_called()
             self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[132,135,138,141,138,135,132,129,132,135])
@@ -281,3 +287,6 @@ class WalkKickTests(unittest.TestCase):
 
     def test_real_loop_hands_over_partial_ball_without_body_action_or_loss_exit(self):
         self.run_loop('partial_handover')
+
+    def test_automatic_visual_search_preserves_pending_position_confirmation(self):
+        self.run_loop('lock_recovery')

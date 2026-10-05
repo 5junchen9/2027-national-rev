@@ -389,8 +389,12 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                     body.mark_head_search(moved)
                     print('Search head:',state.angle,body.reason)
                 else:
-                    print('Visual search: reset location lock, preserve ball color.')
-                ht.begin_search(); bt.begin_search()
+                    print('Visual search: preserve pending position confirmation; reset other locks, keep ball color.')
+                for tracker in (ht,bt):
+                    # 自动重找不要清掉正在确认的新位置；手动R仍可完全重置。
+                    if action == 'REACQUIRE' and tracker.reason.startswith('outside target lock'):
+                        continue
+                    tracker.begin_search()
                 continue
             blind = body.search_stage == 'VISUAL' and action == 'UP_LITTLE'
             body.mark_sent(action,blind=blind)
