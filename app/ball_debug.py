@@ -12,6 +12,48 @@ from dual_kick import camera_settings
 from roboteye import RobotEye
 
 
+def visible_circle_arc(contour, shape):
+    """只检查未被图像边缘裁掉的轮廓，不把裁切直边当作球的圆弧。"""
+    points = contour.reshape(-1,2).astype(float)
+    height,width = shape[:2]
+    points = points[(points[:,0] > 3)&(points[:,0] < width-4)
+                    &(points[:,1] > 3)&(points[:,1] < height-4)]
+    if len(points) < 12:
+        return False
+    # 平移后拟合圆：2*x*cx + 2*y*cy + c = x*x + y*y。
+    points = points-points.mean(axis=0)
+    # 白缝、黑字或遮挡会破坏部分轮廓，分别用几段可见轮廓拟合。
+    # 每个拟合结果必须获得大多数轮廓点支持，不能只凭三个点认球。
+    sections = [points]
+    count = len(points)
+    for start in (0,count//4,count//2):
+        sections.append(points[start:start+count//2])
+    for section in sections:
+        if len(section) < 6:
+            continue
+        matrix = np.column_stack((2*section,np.ones(len(section))))
+        result,_,rank,_ = np.linalg.lstsq(matrix,(section*section).sum(axis=1),rcond=None)
+        if rank < 3:
+            continue
+        center = result[:2]
+        radius_squared = result[2]+np.dot(center,center)
+        if radius_squared <= 0:
+            continue
+        radius = np.sqrt(radius_squared)
+        if not 6 <= radius <= max(width,height)*.7:
+            continue
+        distances = np.linalg.norm(points-center,axis=1)
+        supported = points[np.abs(distances-radius) <= radius*.10]
+        if len(supported) < len(points)*.65:
+            continue
+        angles = np.sort(np.mod(np.arctan2(supported[:,1]-center[1],supported[:,0]-center[0]),2*np.pi))
+        gaps = np.diff(np.append(angles,angles[0]+2*np.pi))
+        coverage = 2*np.pi-gaps.max()
+        if coverage >= np.deg2rad(80):
+            return True
+    return False
+
+
 class PatchTracker:
     """Yellow-green region detection, including frame-clipped balls; no template identity claim."""
     def __init__(self):
@@ -118,7 +160,9 @@ class PatchTracker:
         hsv = cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
         # Search yellow-green and true-green in separate bands. Combining the
         # whole family at once can join a tennis ball to wood/cyan background.
-        low,high = max(24,self.hue-self.hue_width),min(85,self.hue+self.hue_width)
+        # 自动黄绿色检测带排除偏黄褐色地面；手动采色仍用现场颜色。
+        minimum_hue = 30 if self.hue < 55 and not self.manual else 24
+        low,high = max(minimum_hue,self.hue-self.hue_width),min(85,self.hue+self.hue_width)
         strong = cv2.inRange(hsv,(low,self.min_s,self.min_v),(high,255,255))
         # Pale yellow still has a color hint; plain white is only considered near
         # a previously identified ball, never as a whole-image acquisition rule.
@@ -161,14 +205,26 @@ class PatchTracker:
                 self.mask[ly:ly+lh,lx:lx+lw] |= (white[ly:ly+lh,lx:lx+lw]*255).astype(np.uint8)
         kernel = np.ones((3,3),np.uint8)
         self.mask = cv2.morphologyEx(self.mask,cv2.MORPH_OPEN,kernel)
-        pieces,_ = cv2.findContours(self.mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+        pieces,_ = cv2.findContours(self.mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
         span = 50
         if pieces:
             rect = cv2.boundingRect(max(pieces,key=cv2.contourArea))
             span = max(rect[2:])
         close_size = max(5,min(17,int(span*.06)|1))
         self.mask = cv2.morphologyEx(self.mask,cv2.MORPH_CLOSE,np.ones((close_size,close_size),np.uint8))
-        contours,_ = cv2.findContours(self.mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+        contours,_ = cv2.findContours(self.mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+        contours = list(contours)
+        # 强光下球面接近白色，单独检查亮区域，避免先与绿色地板连成一块。
+        # 仍走后面的圆形/圆弧检查，白色矩形不会因为亮就通过。
+        bright_color = cv2.inRange(hsv,(max(24,self.hue-self.hue_width),12,190),(high,255,255))
+        bright_white = cv2.inRange(hsv,(0,0,230),(179,65,255))
+        for bright_mask in (bright_color|bright_white,bright_white):
+            bright_mask = cv2.morphologyEx(bright_mask,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
+            bright_contours,_ = cv2.findContours(bright_mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+            for contour in bright_contours:
+                x,y,w,h = cv2.boundingRect(contour)
+                if np.count_nonzero(green[y:y+h,x:x+w]) >= max(20,w*h*.005):
+                    contours.append(contour)
         candidates = []
         outside_candidates = []
         outside_lock = False
@@ -191,6 +247,8 @@ class PatchTracker:
                     continue  # A white paper rectangle is not a recovered pale ball.
             # Full candidates must be round-ish; clipped candidates can be only a cap.
             clipped = x <= 2 or y <= 2 or x+w >= frame.shape[1]-2 or y+h >= frame.shape[0]-2
+            if clipped and not visible_circle_arc(contour,frame.shape):
+                continue
             selected = self.manual and self.overlap((x,y,w,h)) >= .3
             if not clipped and not selected:
                 perimeter = cv2.arcLength(hull,True)
@@ -206,18 +264,27 @@ class PatchTracker:
                 if self.seeded and self.overlap((x,y,w,h)) < .3:
                     continue
                 lx,ly,lw,lh = self.last_box
-                if not self.seeded and w < lw*.5 and h < lh*.5:
-                    continue  # A sudden tiny cap/background fragment is not a reliable handover.
                 if not self.seeded:
                     limit = max(25,min(60,max(lw,lh)*.65))
                     limit += min(40,np.hypot(shift_x,shift_y)*.35)
-                    if not .45 <= w/lw <= 2.2: continue
                     dx,dy = x+w/2-lx-lw/2-shift_x,y+h/2-ly-lh/2-shift_y
-                    if (abs(dx) > limit if self.pitch_changed else np.hypot(dx,dy) > limit):
+                    wrong_position = abs(dx) > limit if self.pitch_changed else np.hypot(dx,dy) > limit
+                    wrong_size = (w < lw*.5 and h < lh*.5) or not .45 <= w/lw <= 2.2
+                    if wrong_position or wrong_size:
+                        # 正常跟踪仍检查旧尺寸；恢复候选只受颜色与形状筛选限制。
                         outside_lock = True
                         outside_candidates.append(((x,y,w,h),area/(w*h)))
                         continue
             candidates.append(((x,y,w,h),area/(w*h)))
+        # 旧错误框可能还学到了地板颜色。连续丢失后检查另一颜色带，
+        # 手动采色保持用户选定颜色；有待确认候选时不切带清掉计数。
+        if (not candidates and not outside_candidates and not _green_retry and not self.manual
+                and (not self.color_learned or self.missing >= 3)):
+            original_hue = self.hue
+            self.hue = 40 if self.hue >= 55 else 66
+            result = self.update(frame,_green_retry=True,now=now)
+            if result is None: self.hue = original_hue
+            return result
         # 旧位置附近没有合格球时，才允许在更大范围确认新位置。
         # 连续三帧被位置锁拒绝，再要求同一新候选连续出现三帧。
         if not candidates and outside_candidates:
@@ -248,12 +315,6 @@ class PatchTracker:
             best = max(candidates, key=lambda item: (item[1], item[0][2]*item[0][3]))
             candidates = [best]
         if len(candidates) != 1:
-            if not candidates and not self.color_learned and not _green_retry:
-                original_hue = self.hue
-                self.hue = 66
-                result = self.update(frame,_green_retry=True,now=now)
-                if result is None: self.hue = original_hue
-                return result
             self.box = None; self.frames = 0; self.score = 0.0; self.edges = []
             self.stable_frames = 0
             self.missing += 1

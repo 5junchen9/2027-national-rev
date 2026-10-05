@@ -6,6 +6,65 @@ from ball_debug import PatchTracker
 
 
 class BallDebugTests(unittest.TestCase):
+    def test_edge_green_floor_and_rectangles_are_not_balls(self):
+        for box in ((0,0,639,280),(0,40,639,350),(0,0,180,479)):
+            frame=np.zeros((480,640,3),np.uint8)
+            x,y,w,h=box
+            cv2.rectangle(frame,(x,y),(x+w,y+h),(0,240,210),-1)
+            tracker=PatchTracker()
+            for _ in range(6): self.assertIsNone(tracker.update(frame))
+
+    def test_half_balls_on_each_frame_edge_pass_arc_check(self):
+        for center in ((160,0),(160,239),(0,120),(319,120)):
+            frame=np.zeros((240,320,3),np.uint8)
+            cv2.circle(frame,center,35,(0,240,210),-1)
+            self.assertIsNotNone(PatchTracker().update(frame))
+
+    def test_false_large_old_box_does_not_block_smaller_real_ball_forever(self):
+        frame=np.zeros((240,640,3),np.uint8)
+        cv2.circle(frame,(500,140),25,(0,240,210),-1)
+        tracker=PatchTracker();tracker.last_box=(0,0,640,180)
+        for _ in range(4): self.assertIsNone(tracker.update(frame))
+        box=tracker.update(frame)
+        self.assertIsNotNone(box)
+        self.assertAlmostEqual(box[0]+box[2]/2,500,delta=2)
+        self.assertEqual(tracker.frames,1)
+
+    def test_screenshot_floor_candidate_is_replaced_by_ball_box(self):
+        frame=cv2.imread(str(Path(__file__).parent/'fixtures/head_green_floor.png'))
+        tracker=PatchTracker()
+        for _ in range(6): box=tracker.update(frame)
+        self.assertIsNotNone(box)
+        x,y,w,h=box
+        self.assertLess(w,150);self.assertLess(h,150)
+        self.assertAlmostEqual(x+w/2,471,delta=15)
+        self.assertAlmostEqual(y+h/2,265,delta=15)
+
+    def test_screenshot_large_clipped_ball_recovers_from_wrong_floor_lock(self):
+        frame=cv2.imread(str(Path(__file__).parent/'fixtures/belly_large_right.png'))
+        tracker=PatchTracker();tracker.last_box=(0,0,640,300)
+        for _ in range(10): box=tracker.update(frame)
+        self.assertIsNotNone(box)
+        x,y,w,h=box
+        self.assertGreater(x,450);self.assertLess(w,220)
+        self.assertGreater(h,150);self.assertIn('right',tracker.edges)
+
+    def test_wrong_learned_green_floor_color_can_recover_yellow_ball(self):
+        frame=cv2.imread(str(Path(__file__).parent/'fixtures/belly_large_right.png'))
+        tracker=PatchTracker();tracker.last_box=(0,0,640,300)
+        tracker.hue=66;tracker.color_learned=True
+        for _ in range(12): box=tracker.update(frame)
+        self.assertIsNotNone(box)
+        self.assertGreater(box[0],450)
+        self.assertLess(tracker.hue,55)
+
+    def test_new_white_paper_and_white_circle_without_color_hint_are_rejected(self):
+        for circle in (False,True):
+            frame=np.zeros((240,320,3),np.uint8)
+            if circle: cv2.circle(frame,(160,120),35,(255,255,255),-1)
+            else: cv2.rectangle(frame,(80,70),(240,180),(255,255,255),-1)
+            self.assertIsNone(PatchTracker().update(frame))
+
     def test_body_move_reacquires_displaced_ball_without_old_pixel_lock(self):
         tracker=PatchTracker()
         frame=np.zeros((240,640,3),np.uint8)
