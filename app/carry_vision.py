@@ -10,10 +10,13 @@ from robot_config import ROOT
 from roboteye import RobotEye
 from dual_kick import camera_settings
 from kick_shapes import Box, overlap
+from handover_debug import Handover
+from walk_kick import WalkKick
+from ball_debug import distinct_from_background
 
 INITIAL_HEAD_POSITION = 129
 BODY_SERIAL_PORT = '/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0'
-REFERENCE_FILE = ROOT/'config/carry_reference.json'
+REFERENCE_FILE = ROOT/'config/carry_dual_reference.json'
 COLORS = {
     'red': [(0,10),(170,179)],
     'green': [(35,85)],
@@ -41,6 +44,7 @@ def find_blocks(frame, color):
             continue
         if w*h > frame.shape[0]*frame.shape[1]*.35 or area/(w*h) < .55:
             continue
+        if not distinct_from_background(contour,hsv): continue
         hull = cv2.convexHull(contour)
         polygon = cv2.approxPolyDP(hull,.03*cv2.arcLength(hull,True),True)
         if 4 <= len(polygon) <= 6 and area/cv2.contourArea(hull) >= .8:
@@ -148,93 +152,132 @@ class CarryPlanner:
 
 
 def run(color, target_qr, actions=False):
-    settings = camera_settings()['head']
-    reference = None
-    if REFERENCE_FILE.exists():
-        reference = json.loads(REFERENCE_FILE.read_text())
+    settings = camera_settings()
+    reference = json.loads(REFERENCE_FILE.read_text()) if REFERENCE_FILE.exists() else None
     if actions:
-        if (reference is None or reference.get('version') != 1
-                or reference.get('camera') != settings
+        if (reference is None or reference.get('version') != 2
+                or reference.get('cameras') != settings
                 or reference.get('head_position') != INITIAL_HEAD_POSITION
                 or reference.get('target_qr') != target_qr
                 or 'pickup' not in reference or 'drop' not in reference):
-            raise ValueError('先在预览中按 H 标定抱取位置、D 标定目标二维码放下位置')
-    planner = CarryPlanner(reference,settings['flip']) if actions else None
-    block_tracker,qr_tracker = StableTarget(),StableTarget()
+            raise ValueError('先用双摄预览按 H 标定腹部抱取位置、D 标定头部二维码放下位置')
+    planner = CarryPlanner(reference,settings['belly']['flip']) if actions else None
+    handover = Handover(dict(forward=INITIAL_HEAD_POSITION,down_sign=1,bounds=[85,180]))
+    approach = WalkKick()
+    head_tracker,belly_tracker,qr_tracker = StableTarget(),StableTarget(),StableTarget()
     detector = cv2.QRCodeDetector()
     seen_contents = set()
+    belly_seen = 0
     with ExitStack() as stack:
-        eye = RobotEye(**settings,latest=True); stack.callback(eye.close)
-        ok,frame = eye.getImage()
-        if not ok: raise RuntimeError('Camera read failed before startup')
-        if actions and reference.get('shape') != list(frame.shape[:2]):
-            raise ValueError('画面尺寸变化，请重新标定搬运位置')
+        head_eye = RobotEye(**settings['head'],latest=True);stack.callback(head_eye.close)
+        belly_eye = RobotEye(**settings['belly'],latest=True);stack.callback(belly_eye.close)
+        okh,hf = head_eye.getImage();okb,bf = belly_eye.getImage()
+        if not okh or not okb: raise RuntimeError('Camera read failed before startup')
+        shapes = dict(head=list(hf.shape[:2]),belly=list(bf.shape[:2]))
+        if actions and reference.get('shapes') != shapes:
+            raise ValueError('画面尺寸变化，请重新标定双摄搬运位置')
         if actions:
             from robotmove import RobotMove
-            move = RobotMove(None,port=BODY_SERIAL_PORT); stack.callback(move.close)
+            move = RobotMove(None,port=BODY_SERIAL_PORT);stack.callback(move.close)
         from Head import RobotHeadServoOnly
-        head = RobotHeadServoOnly(hold=True); stack.callback(head.cleanup)
-        head.turn_vertical(INITIAL_HEAD_POSITION)
-        eye.discard_frames(1)
+        servo = RobotHeadServoOnly(hold=True);stack.callback(servo.cleanup)
+        servo.turn_vertical(INITIAL_HEAD_POSITION)
+        head_eye.discard_frames(1);belly_eye.discard_frames(1)
         stack.callback(cv2.destroyAllWindows)
         ready_at = time.monotonic()+.5
         print('目标颜色:',color,'目的地二维码:',target_qr)
-        print('H=保存抱取位置；D=保存放下位置；Q=退出。预览不发送身体动作。')
+        print('H=保存腹部抱取位置；D=保存头部二维码放下位置；Q=退出。')
         while True:
-            ok,frame = eye.getImage()
-            if not ok: raise RuntimeError('Camera read failed; no further actions')
-            blocks = find_blocks(frame,color)
-            block = block_tracker.update(blocks)
-            codes = read_qr_codes(frame,detector)
+            okh,hf = head_eye.getImage();okb,bf = belly_eye.getImage()
+            if not okh or not okb: raise RuntimeError('Camera read failed; no further actions')
+            if dict(head=list(hf.shape[:2]),belly=list(bf.shape[:2])) != shapes:
+                raise ValueError('Camera resolution changed; stop actions')
+            head_busy = servo.is_moving()
+            head_blocks,belly_blocks = find_blocks(hf,color),find_blocks(bf,color)
+            head_block = head_tracker.update(head_blocks)
+            belly_block = belly_tracker.update(belly_blocks)
+            belly_seen = belly_seen+1 if belly_block is not None else 0
+            if planner is not None and planner.phase == 'PICKUP':
+                handover.step(None,belly_seen,hf.shape[0])
+                if handover.phase == 'BELLY' and belly_block is None:
+                    handover.phase = 'HEAD';handover.reset_follow()
+            codes = read_qr_codes(hf,detector) if not actions or planner.phase != 'PICKUP' else []
             for content,_ in codes:
                 if content not in seen_contents:
-                    print('读到二维码:',content)
-                    seen_contents.add(content)
+                    print('读到二维码:',content);seen_contents.add(content)
             matches = [box for content,box in codes if content == target_qr]
             qr = qr_tracker.update(matches)
-            display = frame.copy()
-            for box in blocks:
-                cv2.rectangle(display,(int(box.x),int(box.y)),(int(box.x+box.width),int(box.bottom)),(0,255,0),2)
-            for content,box in codes:
-                cv2.rectangle(display,(int(box.x),int(box.y)),(int(box.x+box.width),int(box.bottom)),(255,255,0),2)
-                cv2.putText(display,content,(int(box.x),max(15,int(box.y)-5)),0,.5,(255,255,0),1)
-            phase = planner.phase if actions else 'PREVIEW'
-            reason = planner.reason if actions else 'H=pickup reference; D=drop reference; Q=quit'
-            cv2.putText(display,f'{phase} color={color} blocks={len(blocks)} target QR={len(matches)}',(8,25),0,.5,(255,255,255),1)
-            cv2.putText(display,reason,(8,48),0,.45,(255,255,255),1)
-            cv2.imshow('carry',display)
+            for name,frame,blocks in [('head',hf,head_blocks),('belly',bf,belly_blocks)]:
+                display = frame.copy()
+                for box in blocks:
+                    cv2.rectangle(display,(int(box.x),int(box.y)),(int(box.x+box.width),int(box.bottom)),(0,255,0),2)
+                if name == 'head':
+                    for content,box in codes:
+                        cv2.rectangle(display,(int(box.x),int(box.y)),(int(box.x+box.width),int(box.bottom)),(255,255,0),2)
+                        cv2.putText(display,content,(int(box.x),max(15,int(box.y)-5)),0,.5,(255,255,0),1)
+                phase = planner.phase if actions else 'PREVIEW'
+                reason = planner.reason if actions else 'H=belly pickup; D=head QR drop; Q=quit'
+                cv2.putText(display,f'{phase} {handover.phase} color={color} head={handover.angle}',(8,25),0,.5,(255,255,255),1)
+                cv2.putText(display,reason,(8,48),0,.45,(255,255,255),1)
+                cv2.imshow('carry '+name,display)
             key = cv2.waitKey(1)&255
             if key in (ord('q'),27): return False
             if not actions and key in (ord('h'),ord('d')):
-                box = block if key == ord('h') else qr
-                tracker = block_tracker if key == ord('h') else qr_tracker
+                box = belly_block if key == ord('h') else qr
+                tracker = belly_tracker if key == ord('h') else qr_tracker
                 if box is None or tracker.frames < 5:
                     print('需要唯一且稳定的目标，当前不能保存。');continue
-                # 新建独立标定，不改头部和踢球标定；换二维码需重新标定。
-                if (reference is None or reference.get('camera') != settings
+                if (reference is None or reference.get('version') != 2
+                        or reference.get('cameras') != settings or reference.get('shapes') != shapes
                         or reference.get('head_position') != INITIAL_HEAD_POSITION
-                        or reference.get('target_qr') != target_qr
-                        or reference.get('shape') != list(frame.shape[:2])):
-                    reference = dict(version=1,camera=settings,head_position=INITIAL_HEAD_POSITION,
-                                     target_qr=target_qr,shape=list(frame.shape[:2]))
+                        or reference.get('target_qr') != target_qr):
+                    reference = dict(version=2,cameras=settings,head_position=INITIAL_HEAD_POSITION,
+                                     target_qr=target_qr,shapes=shapes)
+                frame = bf if key == ord('h') else hf
                 normalized = box.normalized(frame.shape)
                 reference['pickup' if key == ord('h') else 'drop'] = [normalized.x,normalized.y,normalized.width,normalized.height]
                 REFERENCE_FILE.write_text(json.dumps(reference,ensure_ascii=False,indent=2))
                 print('已保存:',REFERENCE_FILE)
-            if not actions or time.monotonic() < ready_at: continue
-            target = block if planner.phase == 'PICKUP' else qr
-            tracker = block_tracker if planner.phase == 'PICKUP' else qr_tracker
-            action = planner.decide(target.normalized(frame.shape) if target else None,tracker.frames)
+            if not actions or head_busy or time.monotonic() < ready_at: continue
+            if planner.actions >= 40 or time.monotonic()-planner.started_at >= 180:
+                print('40 actions / 180 seconds limit');return False
+            if planner.phase == 'PICKUP' and handover.phase == 'HEAD':
+                box = (head_block.x,head_block.y,head_block.width,head_block.height) if head_block else None
+                action = approach.decide('HEAD',box,None,head_tracker.frames,0,hf.shape[:2],settings['head']['flip'])
+                # 任一相机有候选时保持头位；多目标等待，不盲选或继续扫描。
+                if head_blocks or belly_blocks:
+                    approach.reset_search()
+                    if belly_blocks or action in ('REACQUIRE','LOWER_HEAD','RAISE_HEAD'): action = 'WAIT'
+                planner.reason = approach.reason
+                if action in ('REACQUIRE','LOWER_HEAD','RAISE_HEAD'):
+                    if action != 'REACQUIRE':
+                        direction = 1 if action == 'LOWER_HEAD' else -1
+                        angle = max(handover.up_limit,min(handover.down,handover.angle+3*direction))
+                        moved = angle != handover.angle
+                        if moved:
+                            handover.angle = angle;servo.begin_vertical(angle,settle_seconds=.18)
+                        approach.mark_head_search(moved)
+                    planner.reason = approach.reason
+                    continue
+            else:
+                target = belly_block if planner.phase == 'PICKUP' else qr
+                tracker = belly_tracker if planner.phase == 'PICKUP' else qr_tracker
+                planner.flip = settings['belly' if planner.phase == 'PICKUP' else 'head']['flip']
+                action = planner.decide(target.normalized(bf.shape if planner.phase == 'PICKUP' else hf.shape) if target else None,tracker.frames)
             if action in ('STOP','DONE'):
                 print(planner.reason);return action == 'DONE'
             if action == 'WAIT': continue
             planner.mark_sent(action)
-            print('搬运动作:',action)
-            move.robotMove(action)
+            approach.reset_observation()
+            print('搬运动作:',action);move.robotMove(action)
             if action == 'DOWN_BOX':
                 print('放下动作已执行；物块是否实际到位需要现场确认。');return True
-            eye.discard_frames(1)
-            block_tracker.reset();qr_tracker.reset()
+            if action == 'HOLD_BOX':
+                # 抱取完成后目标改为头部二维码，恢复与D标定相同的头位。
+                handover.angle = INITIAL_HEAD_POSITION;servo.begin_vertical(INITIAL_HEAD_POSITION)
+            head_eye.discard_frames(1);belly_eye.discard_frames(1)
+            head_tracker.reset();belly_tracker.reset();qr_tracker.reset()
+            belly_seen = 0;handover.reset_follow()
             ready_at = time.monotonic()+.5
 
 

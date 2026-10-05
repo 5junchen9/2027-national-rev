@@ -15,6 +15,52 @@ def enlarged_reference(reference):
     return result
 
 
+class BallDeparture:
+    """只比较同一腹部相机、同一头位的动作前后画面；不是进球判定。"""
+    def __init__(self, flip='none'):
+        self.flip = flip
+        self.reset()
+
+    def reset(self):
+        self.reference = None
+        self.frames = 0
+        self.since = None
+
+    def arm(self, box, shape, angle, now=None):
+        x,y,w,h = box
+        cy = (y+h/2)/shape[0]
+        if self.flip in ('0','-1'): cy = 1-cy
+        self.reference = (w,h,cy,angle)
+        self.started_at = time.monotonic() if now is None else now
+        self.frames = 0
+        self.since = None
+
+    def observe(self, box, stable_frames, shape, angle, now=None):
+        if self.reference is None: return None
+        now = time.monotonic() if now is None else now
+        width,height,previous_y,previous_angle = self.reference
+        if angle != previous_angle or now-self.started_at > 3:
+            self.reset()
+            return None
+        moved_away = False
+        if box is not None and stable_frames >= 3:
+            x,y,w,h = box
+            cy = (y+h/2)/shape[0]
+            if self.flip in ('0','-1'): cy = 1-cy
+            moved_away = (w <= width*.85 and w*h <= width*height*.65
+                          and previous_y-cy >= .06)
+        if moved_away:
+            if self.since is None: self.since = now
+            self.frames += 1
+            if self.frames >= 5 and now-self.since >= .3:
+                return 'DONE'
+            return 'WAIT'
+        self.frames = 0
+        self.since = None
+        # 每次近处前进后先观察至少一秒；丢球不会被判为完成。
+        return 'WAIT' if now-self.started_at < 1 else None
+
+
 class WalkKick:
     """可靠目标驱动动作；丢球只用头部反复上下搜索。"""
     def __init__(self):

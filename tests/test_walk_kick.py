@@ -12,7 +12,7 @@ import handover_debug
 import robotmove
 from handover_debug import Handover, foot_match_details
 from dual_kick import camera_settings
-from walk_kick import WalkKick, enlarged_reference
+from walk_kick import WalkKick, BallDeparture, enlarged_reference
 
 
 class WalkKickTests(unittest.TestCase):
@@ -183,6 +183,10 @@ class WalkKickTests(unittest.TestCase):
         if scenario == 'partial_handover':
             belly_tracker.score=.8
             belly_tracker.stable_frames=1
+        if scenario == 'ball_sent':
+            def show_sent_ball(action):
+                belly_tracker.update.return_value=(280,20,80,60)
+            robot.robotMove.side_effect=show_sent_ball
         if scenario == 'walk_then_disconnect':
             def disconnect_after_move(action):
                 head.getImage.side_effect = RuntimeError('USB disconnected')
@@ -205,8 +209,10 @@ class WalkKickTests(unittest.TestCase):
                      or (scenario in ('partial_handover','visible_head_unstable') and head.getImage.call_count >= 20)
                      or (scenario == 'search_stop' and servo.begin_vertical.call_count >= 10)
                      or (scenario == 'lock_recovery' and head_tracker.begin_search.call_count+belly_tracker.begin_search.call_count >= 1)) else -1), \
-                 patch.object(handover_debug.time,'monotonic',side_effect=iter(i*.1 for i in range(10000))):
-                if scenario == 'walk':
+                 patch.object(handover_debug.time,'monotonic',side_effect=iter(i*(.01 if scenario == 'ball_sent' else .1) for i in range(10000))):
+                if scenario == 'ball_sent':
+                    self.assertTrue(handover_debug.run(actions=True))
+                elif scenario == 'walk':
                     self.assertFalse(handover_debug.run(actions=True))
                 elif scenario in ('startup_no_ball','partial_handover','lock_recovery','visible_head_unstable'):
                     self.assertFalse(handover_debug.run(actions=True))
@@ -280,3 +286,36 @@ class WalkKickTests(unittest.TestCase):
 
     def test_visible_unstable_head_ball_stops_head_search_without_body_action(self):
         self.run_loop('visible_head_unstable')
+
+    def test_real_loop_stops_after_ball_recedes_without_another_forward_action(self):
+        self.run_loop('ball_sent')
+
+
+class BallDepartureTests(unittest.TestCase):
+    def test_five_confirmed_smaller_receding_frames_finish(self):
+        check=BallDeparture()
+        check.arm((250,280,140,140),(480,640),129,now=0)
+        for i in range(4):
+            self.assertEqual(check.observe((270,160,90,90),3,(480,640),129,now=.2+i*.11),'WAIT')
+        self.assertEqual(check.observe((270,160,90,90),3,(480,640),129,now=.7),'DONE')
+
+    def test_lost_ball_or_shrinking_cap_does_not_finish(self):
+        check=BallDeparture();check.arm((250,280,140,140),(480,640),129,now=0)
+        for i in range(12):
+            self.assertNotEqual(check.observe(None,0,(480,640),129,now=i*.1),'DONE')
+        for i in range(8):
+            self.assertNotEqual(check.observe((250,280,140,40),5,(480,640),129,now=1.2+i*.1),'DONE')
+
+    def test_head_move_invalidates_comparison_and_new_step_resets_it(self):
+        check=BallDeparture();check.arm((250,280,140,140),(480,640),129,now=0)
+        self.assertIsNone(check.observe((270,160,90,90),5,(480,640),132,now=.4))
+        self.assertIsNone(check.reference)
+        check.arm((250,280,140,140),(480,640),132,now=1)
+        self.assertEqual(check.frames,0)
+
+    def test_vertical_flip_is_accounted_for_and_unstable_ball_does_not_finish(self):
+        check=BallDeparture('0');check.arm((250,60,140,140),(480,640),129,now=0)
+        for i in range(8):
+            self.assertNotEqual(check.observe((270,220,90,90),1,(480,640),129,now=.2+i*.1),'DONE')
+        for i in range(5): result=check.observe((270,220,90,90),5,(480,640),129,now=1+i*.11)
+        self.assertEqual(result,'DONE')

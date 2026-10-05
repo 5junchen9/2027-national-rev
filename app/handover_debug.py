@@ -10,7 +10,7 @@ from robot_config import ROOT
 from roboteye import RobotEye
 from ball_debug import PatchTracker
 from dual_kick import camera_settings
-from walk_kick import WalkKick, MIN_BALL_SCORE
+from walk_kick import WalkKick, BallDeparture, MIN_BALL_SCORE
 
 BODY_SERIAL_PORT = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0"
 # 修改这里即可调整本流程的初始位置。
@@ -141,6 +141,7 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
     validate(head_profile,foot,settings)  # All checks precede physical control.
     state = Handover(head_profile)
     body = WalkKick() if actions else None
+    departure = BallDeparture(settings['belly']['flip'])
     ht,bt = PatchTracker(),PatchTracker()
     for key in ('hue','hue_width','min_s','min_v'): setattr(bt,key,foot['color'][key])
     print(f'Startup head={forward}; head command limits={sorted((state.up_limit,state.down))}; requested FPS={fps}.')
@@ -149,6 +150,7 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
     if actions: print('Fixed robot serial:',BODY_SERIAL_PORT)
     print('G=restart head phase; R=unlock trackers; Q=quit. Belly ball follows image center.')
     print('Align ball, walk one action, then observe again.' if actions else 'Move ball by hand from head view into belly view.')
+    if actions: print('After belly forward step: observe, stop if ball repeatedly shrinks and recedes; no goal verification.')
     if actions: print('Loss recovery: visual search -> repeat 4 down / 4 up head moves, 1.5s per pose; Q to quit.')
     print('Saved calibrations are read, not overwritten.')
     print('S=select HEAD ball; B=select BELLY ball. Drag a green ball region, ENTER=confirm, C=cancel.')
@@ -191,8 +193,7 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                 raise ValueError('Resolution changed from saved calibration')
             head_busy = servo.is_moving()
             detect_at = time.monotonic()
-            # Moving-camera frames are for preview; use settled frames for
-            # target decisions while the belly continues to track throughout.
+            # 移动中也检测目标，但身体动作决定等待头部停稳。
             hb = ht.update(hf)
             bb = bt.update(bf)
             if ht.score < MIN_BALL_SCORE: hb = None
@@ -273,6 +274,7 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                 if body:
                     body.reset_observation()
                     body.reset_search()
+                    departure.reset()
                 continue
             if key == ord('g'):
                 state = Handover(head_profile)
@@ -282,6 +284,7 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                 if body:
                     body.reset_observation()
                     body.reset_search()
+                    departure.reset()
                 continue
             if key == ord('r'):
                 ht,bt = PatchTracker(),PatchTracker()
@@ -290,9 +293,17 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                 if body:
                     body.reset_observation()
                     body.reset_search()
+                    departure.reset()
                 continue
 
             if not actions or head_busy or time.monotonic() < body_ready_at:
+                continue
+            result = departure.observe(bb,bt.stable_frames,bf.shape[:2],state.angle)
+            if result == 'DONE':
+                print('Ball moved away after forward step; possibly sent out. Stop walking; goal not verified.')
+                return True
+            if result == 'WAIT':
+                body.reason = 'observe ball after forward step; body held'
                 continue
             ambiguous = 'competing' in bt.reason or (state.phase == 'HEAD' and 'competing' in ht.reason)
             view = settings['head'] if state.phase == 'HEAD' else settings['belly']
@@ -330,6 +341,10 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
             body.mark_sent(action,blind=blind)
             print('Body action:',action,'blind steps:',body.blind_steps)
             move.robotMove(action)
+            if action == 'UP_LITTLE' and state.phase == 'BELLY' and bb is not None:
+                departure.arm(bb,bf.shape[:2],state.angle)
+            else:
+                departure.reset()
             head.discard_frames(1); belly.discard_frames(1)
             ht.notify_body_move(); bt.notify_body_move()
             state.reset_follow()

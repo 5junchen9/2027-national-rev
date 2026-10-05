@@ -78,19 +78,27 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual(planner.decide(Box(.4,.3,.2,.2),5),'STOP')
 
     def test_real_entry_selects_destination_and_closes_resources(self):
-        settings=camera_settings()['head']
+        settings=camera_settings()
         frame=np.zeros((480,640,3),np.uint8)
         pickup=Box(256,240,64,48);drop=Box(256,144,128,96)
-        eye,servo,robot=Mock(),Mock(),Mock()
-        eye.getImage.return_value=(True,frame)
+        eye,belly,servo,robot=Mock(),Mock(),Mock(),Mock()
+        belly.getImage.return_value=(True,frame)
+        servo.is_moving.return_value=False
+        head_frame=frame.copy()
+        eye.getImage.return_value=(True,head_frame)
+        approached=False
+        def show_belly_after_approach(action):
+            nonlocal approached
+            if action == 'UP_LITTLE': approached=True
+        robot.robotMove.side_effect=show_belly_after_approach
         robot_factory=Mock(return_value=robot)
-        reference=dict(version=1,camera=settings,head_position=129,target_qr='DROP',
-                       shape=[480,640],**self.reference())
+        reference=dict(version=2,cameras=settings,head_position=129,target_qr='DROP',
+                       shapes=dict(head=[480,640],belly=[480,640]),**self.reference())
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'carry_reference.json';path.write_text(json.dumps(reference))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
-                 patch.object(carry_vision,'RobotEye',return_value=eye), \
-                 patch.object(carry_vision,'find_blocks',return_value=[pickup]), \
+                 patch.object(carry_vision,'RobotEye',side_effect=[eye,belly]), \
+                 patch.object(carry_vision,'find_blocks',side_effect=lambda image,color: [Box(288,150,64,48)] if image is head_frame else ([pickup] if approached else [])), \
                  patch.object(carry_vision,'read_qr_codes',return_value=[('OTHER',Box(10,10,30,30)),('DROP',drop)]), \
                  patch.dict('sys.modules',{
                      'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo),
@@ -100,9 +108,9 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(1000))):
                 self.assertTrue(carry_vision.run('red','DROP',actions=True))
             self.assertEqual(json.loads(path.read_text()),reference)
-        self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],['HOLD_BOX','DOWN_BOX'])
+        self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],['UP_LITTLE','HOLD_BOX','DOWN_BOX'])
         servo.turn_vertical.assert_called_once_with(129)
-        robot.close.assert_called_once();servo.cleanup.assert_called_once();eye.close.assert_called_once()
+        robot.close.assert_called_once();servo.cleanup.assert_called_once();eye.close.assert_called_once();belly.close.assert_called_once()
 
     def test_missing_reference_does_not_open_camera_or_serial(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -113,11 +121,12 @@ class CarryVisionTests(unittest.TestCase):
 
     def test_preview_never_opens_body_serial(self):
         frame=np.zeros((480,640,3),np.uint8)
-        eye,servo=Mock(),Mock();eye.getImage.return_value=(True,frame)
+        eye,belly,servo=Mock(),Mock(),Mock();eye.getImage.return_value=belly.getImage.return_value=(True,frame)
+        servo.is_moving.return_value=False
         factory=Mock()
         with tempfile.TemporaryDirectory() as folder:
             with patch.object(carry_vision,'REFERENCE_FILE',Path(folder)/'missing.json'), \
-                 patch.object(carry_vision,'RobotEye',return_value=eye), \
+                 patch.object(carry_vision,'RobotEye',side_effect=[eye,belly]), \
                  patch.object(carry_vision,'read_qr_codes',return_value=[]), \
                  patch.dict('sys.modules',{
                      'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo),
@@ -126,4 +135,63 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'waitKey',return_value=ord('q')):
                 self.assertFalse(carry_vision.run('red','DROP',actions=False))
         factory.assert_not_called()
-        eye.close.assert_called_once();servo.cleanup.assert_called_once()
+        eye.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
+
+    def test_preview_saves_belly_pickup_and_head_qr_in_separate_dual_reference(self):
+        hf=np.zeros((240,320,3),np.uint8)
+        bf=np.zeros((480,640,3),np.uint8)
+        head,belly,servo=Mock(),Mock(),Mock()
+        head.getImage.return_value=(True,hf);belly.getImage.return_value=(True,bf)
+        servo.is_moving.return_value=False
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'carry_dual_reference.json'
+            with patch.object(carry_vision,'REFERENCE_FILE',path), \
+                 patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
+                 patch.object(carry_vision,'find_blocks',side_effect=lambda image,color: [Box(256,240,64,48)] if image is bf else []), \
+                 patch.object(carry_vision,'read_qr_codes',return_value=[('DROP',Box(128,72,64,48))]), \
+                 patch.dict('sys.modules',{'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo)}), \
+                 patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
+                 patch.object(cv2,'waitKey',side_effect=[-1]*6+[ord('h'),ord('d'),ord('q')]):
+                self.assertFalse(carry_vision.run('blue','DROP'))
+            reference=json.loads(path.read_text())
+        self.assertEqual(reference['version'],2)
+        self.assertEqual(reference['pickup'],[.4,.5,.1,.1])
+        self.assertEqual(reference['drop'],[.4,.3,.2,.2])
+        self.assertEqual(reference['shapes'],dict(head=[240,320],belly=[480,640]))
+        head.close.assert_called_once();belly.close.assert_called_once()
+
+    def test_pickup_search_moves_only_head_and_stops_when_block_appears(self):
+        settings=camera_settings();frame=np.zeros((480,640,3),np.uint8)
+        head,belly,servo,robot=Mock(),Mock(),Mock(),Mock()
+        head.getImage.return_value=belly.getImage.return_value=(True,frame)
+        servo.is_moving.return_value=False
+        def blocks(image,color):
+            # 已发一个搜索小步后出现未稳定方块，立即停止新的头部搜索。
+            return [Box(288,150,64,48)] if servo.begin_vertical.call_count else []
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'carry_dual_reference.json'
+            path.write_text(json.dumps(dict(version=2,cameras=settings,head_position=129,target_qr='DROP',
+                                           shapes=dict(head=[480,640],belly=[480,640]),**self.reference())))
+            keys=iter([-1]*25+[ord('q')])
+            with patch.object(carry_vision,'REFERENCE_FILE',path), \
+                 patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
+                 patch.object(carry_vision,'find_blocks',side_effect=blocks), \
+                 patch.object(carry_vision,'read_qr_codes',return_value=[]), \
+                 patch.dict('sys.modules',{'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo),
+                                          'robotmove':types.SimpleNamespace(RobotMove=lambda *args,**kwargs:robot)}), \
+                 patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
+                 patch.object(cv2,'waitKey',side_effect=lambda _:next(keys)), \
+                 patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(1000))):
+                self.assertFalse(carry_vision.run('blue','DROP',actions=True))
+        servo.begin_vertical.assert_called_once_with(132,settle_seconds=.18)
+        # 两个相机已看见，但尚未到腹部标定抱取位置，不发抱取指令。
+        self.assertTrue(all(call.args[0] != 'HOLD_BOX' for call in robot.robotMove.call_args_list))
+        self.assertTrue(all(call.args[0] not in ('TURN_LEFT','TURN_RIGHT') for call in robot.robotMove.call_args_list))
+
+    def test_old_single_camera_reference_is_not_used_for_dual_actions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'carry_dual_reference.json'
+            path.write_text(json.dumps(dict(version=1,pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2])))
+            with patch.object(carry_vision,'REFERENCE_FILE',path),patch.object(carry_vision,'RobotEye') as eye:
+                with self.assertRaises(ValueError):carry_vision.run('blue','DROP',actions=True)
+                eye.assert_not_called()
