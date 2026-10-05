@@ -1,0 +1,44 @@
+{
+  "source": "D:\\13470\\Downloads\\juncheng_wu-project-1-export.zip",
+  "records": 1216,
+  "counts": {
+    "haowenwan": {
+      "testing": 49,
+      "training": 200
+    },
+    "testing": {
+      "testing": 16
+    },
+    "unknown": {
+      "testing": 1
+    },
+    "wujuncheng": {
+      "testing": 41,
+      "training": 200
+    },
+    "xieyuting": {
+      "testing": 55,
+      "training": 213
+    },
+    "yangchengrui": {
+      "testing": 51,
+      "training": 205
+    },
+    "zhaobowen": {
+      "testing": 21,
+      "training": 164
+    }
+  },
+  "image_sizes": {
+    "(4284, 5712)": 19,
+    "(518, 691)": 16,
+    "(3072, 4096)": 16,
+    "(240, 320)": 53,
+    "(512, 512)": 1108,
+    "(3024, 4032)": 4
+  },
+  "missing_files": [],
+  "cross_split_exact_duplicate_hashes": 0,
+  "unique_image_hashes": 1216,
+  "note": "Exact hash checks cannot exclude near duplicates or shared capture sessions; archive to current EIM correspondence is unverified."
+}

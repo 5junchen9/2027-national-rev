@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-03",
+  "software_tests_passed": 38,
+  "validated_motion_frames": 197,
+  "simulation": "passed; dual kick dispatch mocked, no physical geometry validation",
+  "shell_syntax": "setup.sh and diagnose.sh passed Git Bash -n",
+  "original_files_sha256_verified": 234,
+  "legacy_files_sha256_verified": 261,
+  "asset_files_sha256_verified": 89,
+  "not_verified": [
+    "Raspberry Pi installation",
+    "simultaneous USB and CSI capture",
+    "field ball and goal recognition",
+    "physical handover and right-foot calibration",
+    "physical motion and goal scoring"
+  ],
+  "deployment_root_in_zip": "robot_env/",
+  "no_autostart": true
+}

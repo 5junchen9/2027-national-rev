@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-03",
+  "software_tests_passed": 27,
+  "validated_motion_frames": 197,
+  "simulated_task_routes": "passed; no hardware opened",
+  "shell_syntax": "setup.sh and diagnose.sh passed Git Bash -n",
+  "original_files_sha256_verified": 234,
+  "copied_asset_files_sha256_verified": 89,
+  "manual_qa": "13 pages rendered by Microsoft Word and inspected as PNG; packaged renderer unavailable because LibreOffice is not installed",
+  "not_verified": [
+    "Raspberry Pi apt/pip installation",
+    "physical serial motion and camera/audio hardware",
+    "Linux arm64 EIM inference",
+    "field recognition accuracy",
+    "new-rule autonomous tasks and CSI integration"
+  ],
+  "deployment_root_in_zip": "robot_legacy/",
+  "changes": [
+    "separate directory, original files preserved",
+    "USB main camera default",
+    "face threshold configuration",
+    "reset consecutive confirmation after lost face or failed frame",
+    "no-action model metadata and cropped-image scoring diagnostic"
+  ],
+  "no_autostart": true
+}

@@ -1,0 +1,36 @@
+# robot_env 双摄反馈右脚踢球版
+
+2026-10-05：已回退持续搜索和新增强光白球版本；丢球搜索只移动头部，不旋转、不搜索前进。正常目标对齐与搬运保留。
+
+
+2026-10-04：`main.py handover --run --actions` 现为球门形状对齐后行走带球调试，初始回正129、取消137低头终点，不发送单独踢球动作。`main.py carry --mode visual --run` 新增指定颜色方块与二维码搬运预览，`--actions` 才启用身体动作。复制文件、标定与启动步骤见 [球门与视觉搬运](docs/球门与视觉搬运-20261004.md)。下文 `kick --mode dual` 和固定搬运是另一条旧入口，语音入口尚未接入这次视觉搬运。
+
+本目录对应树莓派 `/home/yuting/robot_env`，是新代码的维护与迁移入口。原 `Desktop` 和 `robot_legacy` 保留。没有开机启动。
+
+完整安装、标定与运行说明见 [双摄反馈右脚踢球](docs/双摄反馈右脚踢球.md)；原功能和模型使用方法见 `docs/旧代码整理与视觉识别使用手册.md`。旧手册中的 robot_legacy 路径属于历史整理版，本版统一使用 robot_env。
+
+默认踢球改为 dual：头部 USB 找球和门，腹部 CSI 接管近距离球定位，每个动作后重新观察，对准实测右脚区域后只踢一次。原固定左脚可通过 `--mode fixed` 使用。语音4和整轮流程中的踢球默认调用新版；缺少标定会退出。
+
+```bash
+cd /home/yuting/robot_env
+bash setup.sh
+source venv/bin/activate
+python3 main.py check
+python3 main.py simulate
+python3 main.py kick --mode dual --preview
+```
+
+预览不会发送动作。两路同时看见交接位置的同一个球时按 H；将球放在实测右脚击球位置，身体面向门，在 belly 窗口两次点击选球心区域，按 S 保存，Q 退出。操作细节和失败原因见双摄手册。
+
+确认标定和机器人串口后，真实运行使用：
+
+```bash
+export ROBOT_SERIAL_PORT=/dev/ttyUSB0
+python3 main.py kick --mode dual --run
+```
+
+只在 ttyUSB0 确实连接机器人控制板时使用该端口；推荐完整 `/dev/serial/by-path/` 路径。单独运行 `main.py kick` 只输出计划。
+
+配置在 `config/robot.env`，标定在 `config/kick_calibration.json`，运行日志在 `logs/`。迁移包 `robot_env_dual_kick.zip` 内顶层为 robot_env，不包含虚拟环境或系统设置。安装前备份树莓派现有 robot_env；原有模型、录音和动作资源保留。
+
+目前仅通过软件测试，双摄同时采集、现场识别、交接位置和进门效果需要实机验证。原前进动作仍是一整段 DZZ；若动作幅度过大，需要实测的小步动作文件。程序尚不自动确认进球。

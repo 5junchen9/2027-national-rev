@@ -1,0 +1,8 @@
+# OpenCV、NumPy、PyAudio、RPi.GPIO 和 zbar 使用 README 中的 apt 包。
+edge_impulse_linux==1.2.2
+imutils==0.5.4
+pyserial
+pyzbar
+six
+sherpa-onnx==1.13.8
+vosk==0.3.45

@@ -1,0 +1,1406 @@
+[
+  {
+    "source": "__pycache__/chinese_speech.cpython-312.pyc",
+    "sha256": "c772c13d238c26a79744ea995e177bfea530d60c45a19c65c3de6c02d6b6a348",
+    "destination": null,
+    "category": "cache omitted"
+  },
+  {
+    "source": "__pycache__/chinese_speech.cpython-314.pyc",
+    "sha256": "d605bb6d88e7cd10751a1c8699cbb089bd770660a6ed55107e7703b24f3abc53",
+    "destination": null,
+    "category": "cache omitted"
+  },
+  {
+    "source": "__pycache__/face_main.cpython-312.pyc",
+    "sha256": "abba9e70b6aab2c8f4086a37f07ccfc82ee2375653e4fabf542920d6143f25da",
+    "destination": null,
+    "category": "cache omitted"
+  },
+  {
+    "source": "__pycache__/face_main.cpython-314.pyc",
+    "sha256": "b7b06bd70bbafb7520c67383eaf30335522c2bf47b5172173d015a4188c5fc5d",
+    "destination": null,
+    "category": "cache omitted"
+  },
+  {
+    "source": "__pycache__/test_chinese_speech.cpython-312.pyc",
+    "sha256": "c6f2b1757eb2875ac272cbe82fde23ba71c10999580e33e541f9dc513dfa63b5",
+    "destination": null,
+    "category": "cache omitted"
+  },
+  {
+    "source": "__pycache__/test_chinese_speech.cpython-314.pyc",
+    "sha256": "1d6609e135ae251322b4f7f3e054c90e15966ebfa062556e289741d9977c4909",
+    "destination": null,
+    "category": "cache omitted"
+  },
+  {
+    "source": "b3/2/ball.py",
+    "sha256": "5c9c2cbbd92331bb9ca394c7c4011693afb9ca9a7e3bbab80c02d5eab91ea694",
+    "destination": "legacy/b3/2/ball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/basedata.py",
+    "sha256": "e593ed640b101a9a9df790fd73fdcefa54f348664a8a7ebb529e23cf311c157c",
+    "destination": "legacy/b3/2/basedata.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/colorhsv_mouse.py",
+    "sha256": "e7619b21938ddc7032da1d36c4afed4020f6e505e16b78df26fdf54b49e0fcb9",
+    "destination": "legacy/b3/2/colorhsv_mouse.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/colorhsv_mouse_use.py",
+    "sha256": "c3d7f57e629cded94c8129a2a06e687927af1e02b4449e68f719440745fe3f59",
+    "destination": "legacy/b3/2/colorhsv_mouse_use.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/colorhsv_mousetest.py",
+    "sha256": "dd51d42e311a1235df3019d102b3823b664a51c2af03c3a5974785543fa2a54c",
+    "destination": "legacy/b3/2/colorhsv_mousetest.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/dance.py",
+    "sha256": "2e4a3b5cc99793760dac34166254db6823a82229712df1ee5c58457bba6f630a",
+    "destination": "legacy/b3/2/dance.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/day.py",
+    "sha256": "695a584d9df4ab5fa21d2162232746a755245974c460f9c22ce25ffb45308ed8",
+    "destination": "legacy/b3/2/day.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/day2.py",
+    "sha256": "61f4d445c58cc2ccbfaf2b824a95fc5a980db72ce2c48854b416a60749aec836",
+    "destination": "legacy/b3/2/day2.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/day3.py",
+    "sha256": "5ccba4bd804178171b8e4dc3b8dfb181c9a76913ae862cbae27783849c55fa09",
+    "destination": "legacy/b3/2/day3.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/day3new.py",
+    "sha256": "5ccba4bd804178171b8e4dc3b8dfb181c9a76913ae862cbae27783849c55fa09",
+    "destination": "legacy/b3/2/day3new.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/findball.py",
+    "sha256": "8a198038f9145db209d04b91a5e2cafbaf838640153d04cec2bb5daeabcd6e42",
+    "destination": "legacy/b3/2/findball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/findbox.py",
+    "sha256": "34cb0a23fbb0e628ea6013c87000b71fb8387ad2e40a727b41c90624fd84369e",
+    "destination": "legacy/b3/2/findbox.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/findrectangle.py",
+    "sha256": "2b7fc31d910f12c51e998aeeb43380544f15f58927845d1d20493864caa6c348",
+    "destination": "legacy/b3/2/findrectangle.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/haar/haarcascade_eye.xml",
+    "sha256": "71cc64fc305a355dc60067880f6fbbd43dd155bd63ee3844661a1bda34b2fd8c",
+    "destination": "legacy/b3/2/haar/haarcascade_eye.xml",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/haar/haarcascade_frontalface_default.xml",
+    "sha256": "0f7d4527844eb514d4a4948e822da90fbb16a34a0bbbbc6adc6498747a5aafb0",
+    "destination": "legacy/b3/2/haar/haarcascade_frontalface_default.xml",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/haar/lebo.py",
+    "sha256": "e2a5cecb770eae1ed3c251947dd48af962bdc56355a7bb948168941473b81d9a",
+    "destination": "legacy/b3/2/haar/lebo.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/Head.py",
+    "sha256": "0ce59d89681f83111bb145c380fcfef8a31340a99457d3d8636501e9900f7b5e",
+    "destination": "legacy/b3/2/Head.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/headservo.py",
+    "sha256": "0d938606abbeeb763b4e23049ff836714c476e898877c2949c1a916a623ea1bc",
+    "destination": "legacy/b3/2/headservo.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/holdbox.py",
+    "sha256": "363af7190695bdc9b83f1d82f5abc8e64681579593399b1188f876aae13f791b",
+    "destination": "legacy/b3/2/holdbox.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/holdbox2.py",
+    "sha256": "24b7376688c66ba850fab407c2e49566f140c39eeaf87939794a2d06488900ad",
+    "destination": "legacy/b3/2/holdbox2.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/holdbox2NEW.py",
+    "sha256": "b69ded7c8bde7d06c86f6fd4428372a1ad867c730dbda8118be509daa1f288ee",
+    "destination": "legacy/b3/2/holdbox2NEW.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/myangle.py",
+    "sha256": "900e7712925c439881eb70a63b24fce1d77acb43358205711deb2b3b8322cbf3",
+    "destination": "legacy/b3/2/myangle.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/playball.py",
+    "sha256": "edb462f933d10ee9c126b4cd9b145184aa497dd77745d5c9b235b46141e7d2ce",
+    "destination": "legacy/b3/2/playball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/robotbarcode.py",
+    "sha256": "39610b6b15fc31f5bee00f39ebb06fe804e6188a6f18fdb52658f755fa369ab1",
+    "destination": "legacy/b3/2/robotbarcode.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/RobotEnum.py",
+    "sha256": "e70e5146b01a92cda3442c320eac5940a03afda08efea29519ab2b34e69089ee",
+    "destination": "legacy/b3/2/RobotEnum.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/roboteye.py",
+    "sha256": "3b323ca710496a506cfc6205e9dfb5c37d1e4690d8be31ae0463c533af072021",
+    "destination": "legacy/b3/2/roboteye.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/robotmove.py",
+    "sha256": "1b0f35caf0f42237fb5bd0d1b6ed659b9f93af307c1430d1a285e1f5ccb6efd0",
+    "destination": "legacy/b3/2/robotmove.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/touying.py",
+    "sha256": "3f54b717c36d331a47eecdb464c72289da684071e45045eac38ea29d28484638",
+    "destination": "legacy/b3/2/touying.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/2/zhuiqiu.py",
+    "sha256": "6293057df2895d9d8c49a8a565c9d5f91741ef201cef87865f6d0b1641402e97",
+    "destination": "legacy/b3/2/zhuiqiu.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/dance.mp3",
+    "sha256": "abeacdf122a88389236e5f6f85ea10358b3a65be9b800c52fec694238a535af6",
+    "destination": "legacy/b3/dance.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/Line/img/ballhsv.json",
+    "sha256": "42ea5aef642f0c7fb660f6f637639976aba1d24b74f532a529e05f84db2165db",
+    "destination": "legacy/b3/Line/img/ballhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/Line/img/blackhsv.json",
+    "sha256": "170295ac5c3b3cb5e5bce8defdce1b1ea6edf38dcda5242443d8d0f51f98cd70",
+    "destination": "legacy/b3/Line/img/blackhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/Line/img/bluehsv.json",
+    "sha256": "71c2634e02dd8a3b301ab363b6fb2aa1a0db7ee028832e63257ad3995c218f04",
+    "destination": "legacy/b3/Line/img/bluehsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/Line/img/bluehsv2.json",
+    "sha256": "de5a5d59a477bdfdb6a0893bead02ce51ccba680df708d10b59d7af31dc3746f",
+    "destination": "legacy/b3/Line/img/bluehsv2.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/Line/img/greenhsv.json",
+    "sha256": "a1efd713dc064947b216895d6957529464c600620249c9cda47309dfa1276de2",
+    "destination": "legacy/b3/Line/img/greenhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/Line/img/redhsv.json",
+    "sha256": "bcebd87268a1053d2e0f3e3f8ad0e8990bee049b170bc675c42038590468e760",
+    "destination": "legacy/b3/Line/img/redhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/Line/img/yellowhsv.json",
+    "sha256": "79172b960d0a86519aea5c8a7b6aa68e4c41ae9d61f5741b536eaae78906c361",
+    "destination": "legacy/b3/Line/img/yellowhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b3/童星小伴.txt",
+    "sha256": "1cd17d0ff10da28c05e0c931c808ced68e4332353d606b26e389c1859112fef5",
+    "destination": "legacy/b3/童星小伴.txt",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/ball.py",
+    "sha256": "5c9c2cbbd92331bb9ca394c7c4011693afb9ca9a7e3bbab80c02d5eab91ea694",
+    "destination": "legacy/b31/2/ball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/basedata.py",
+    "sha256": "e593ed640b101a9a9df790fd73fdcefa54f348664a8a7ebb529e23cf311c157c",
+    "destination": "legacy/b31/2/basedata.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/colorhsv_mouse.py",
+    "sha256": "0864a8c05566a17ea3ca779844d0b8827bb62922227ba5706edec2d7a4c9ef57",
+    "destination": "legacy/b31/2/colorhsv_mouse.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/colorhsv_mouse_use.py",
+    "sha256": "c3d7f57e629cded94c8129a2a06e687927af1e02b4449e68f719440745fe3f59",
+    "destination": "legacy/b31/2/colorhsv_mouse_use.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/colorhsv_mousetest.py",
+    "sha256": "dd51d42e311a1235df3019d102b3823b664a51c2af03c3a5974785543fa2a54c",
+    "destination": "legacy/b31/2/colorhsv_mousetest.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/dance.py",
+    "sha256": "7359d240cc537586c63fbf3284ac05f96a515ff87bc170109f21a9f24dbbc0dd",
+    "destination": "legacy/b31/2/dance.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/data/faces/README.md",
+    "sha256": "16b6f14165fc75c3d4a07d8fff091a93e99eb7a3044e5d911b64cbe32621a6dc",
+    "destination": "legacy/b31/2/data/faces/README.md",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/day.py",
+    "sha256": "695a584d9df4ab5fa21d2162232746a755245974c460f9c22ce25ffb45308ed8",
+    "destination": "legacy/b31/2/day.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/day2.py",
+    "sha256": "61f4d445c58cc2ccbfaf2b824a95fc5a980db72ce2c48854b416a60749aec836",
+    "destination": "legacy/b31/2/day2.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/day3.py",
+    "sha256": "5ccba4bd804178171b8e4dc3b8dfb181c9a76913ae862cbae27783849c55fa09",
+    "destination": "legacy/b31/2/day3.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/day3new.py",
+    "sha256": "65749362ce1694422c066085f8ba59083920670f1acee258e92212345f1aad2a",
+    "destination": "legacy/b31/2/day3new.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/dreammaker_protocol.py",
+    "sha256": "5f9e50977df700e7894f6d9ad5c7cf0c780a9ce6c25e512ee3bb0c99ee223c92",
+    "destination": "hardware/dreammaker_protocol.py",
+    "category": "active hardware"
+  },
+  {
+    "source": "b31/2/face_eim.py",
+    "sha256": "d8e6a708cd3ea3fc599d77a9f23bdb377c5e82e37be06c98e6bd235e67893add",
+    "destination": "hardware/face_eim.py",
+    "category": "active hardware"
+  },
+  {
+    "source": "b31/2/findball.py",
+    "sha256": "8a198038f9145db209d04b91a5e2cafbaf838640153d04cec2bb5daeabcd6e42",
+    "destination": "legacy/b31/2/findball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/findbox.py",
+    "sha256": "504d0b1057a18e2b5bdd056e78371b5aef5f8fe50f7894d3d231659cfaf4a4ff",
+    "destination": "legacy/b31/2/findbox.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/findrectangle.py",
+    "sha256": "2b7fc31d910f12c51e998aeeb43380544f15f58927845d1d20493864caa6c348",
+    "destination": "legacy/b31/2/findrectangle.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/haar/haarcascade_eye.xml",
+    "sha256": "71cc64fc305a355dc60067880f6fbbd43dd155bd63ee3844661a1bda34b2fd8c",
+    "destination": "assets/haar/haarcascade_eye.xml",
+    "category": "vision asset"
+  },
+  {
+    "source": "b31/2/haar/haarcascade_frontalface_default.xml",
+    "sha256": "0f7d4527844eb514d4a4948e822da90fbb16a34a0bbbbc6adc6498747a5aafb0",
+    "destination": "assets/haar/haarcascade_frontalface_default.xml",
+    "category": "vision asset"
+  },
+  {
+    "source": "b31/2/haar/lebo.py",
+    "sha256": "e2a5cecb770eae1ed3c251947dd48af962bdc56355a7bb948168941473b81d9a",
+    "destination": "assets/haar/lebo.py",
+    "category": "vision asset"
+  },
+  {
+    "source": "b31/2/Head.py",
+    "sha256": "c471888b7ab36db6e42527e89109cad776e279817a30129c17a5dd0c6c1d46e7",
+    "destination": "hardware/Head.py",
+    "category": "active hardware"
+  },
+  {
+    "source": "b31/2/headservo.py",
+    "sha256": "0d938606abbeeb763b4e23049ff836714c476e898877c2949c1a916a623ea1bc",
+    "destination": "legacy/b31/2/headservo.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/holdbox.py",
+    "sha256": "862fa164c9e0c7cb9f19150fb22077e3f9108025567fa0da54f1949cc873bf61",
+    "destination": "legacy/b31/2/holdbox.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/holdbox2.py",
+    "sha256": "24b7376688c66ba850fab407c2e49566f140c39eeaf87939794a2d06488900ad",
+    "destination": "legacy/b31/2/holdbox2.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/holdbox2NEW.py",
+    "sha256": "b69ded7c8bde7d06c86f6fd4428372a1ad867c730dbda8118be509daa1f288ee",
+    "destination": "legacy/b31/2/holdbox2NEW.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/install_face_model.sh",
+    "sha256": "93229b0686e1e2afe8c6c087056bb7c59f6386d45baa419f92b679453aee461e",
+    "destination": "legacy/b31/2/install_face_model.sh",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/models/emotion/emotion.eim",
+    "sha256": "285e3e2511f3b7d90e854b3fe5889579dab0f2171c967bb068ded08232c3be03",
+    "destination": "assets/models/emotion/emotion.eim",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/face/face.eim",
+    "sha256": "b1a3ded610fcb19925f72e96a1d4d83f3b2949d96a357d418da3938d04b8a6e0",
+    "destination": "assets/models/face/face.eim",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/face/README.md",
+    "sha256": "ca9ffce98e0d684b303407025ddd085a62d1d4e51a8aba13dc29a48a48e91c0a",
+    "destination": "assets/models/face/README.md",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/date.fst",
+    "sha256": "eb8aa079ae3cb81d8f4404992f39d61a0cb990947512b5b8d1e54d1f6980e718",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/date.fst",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/generate_user_dict.py",
+    "sha256": "24541017b4b60d8e1ad94a5165f7097d2fd107d4ceecbf13583dd37682fdd2a7",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/generate_user_dict.py",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/hmm_model.utf8",
+    "sha256": "f17790586ac86dd048c8adffed052c4bd2b28ed0682972c1275e59040c0589a7",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/hmm_model.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/idf.utf8",
+    "sha256": "dbd1e03d72b2263cc8d84a4304ed77677eed9e7deaf43a1a5133bbba9733b535",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/idf.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/jieba.dict.utf8",
+    "sha256": "3043b77068e09c9904f27cad82f12b6ebe9dbdb5aeff3b25e45ab7f9c1122b55",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/jieba.dict.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/pos_dict/char_state_tab.utf8",
+    "sha256": "28b7be1dd7369766a51445af4d42e9a2ba4bf374c13be5bc1ca7721e27271dbb",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/pos_dict/char_state_tab.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/pos_dict/prob_emit.utf8",
+    "sha256": "c33c4cb7edf3b3a5947df7209b6e9f267eae1f21335d9e2bd2521ea07105457a",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/pos_dict/prob_emit.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/pos_dict/prob_start.utf8",
+    "sha256": "13623ea0e9300bdb597cb2da28770b7b385d6c0098d66e516083fb01b6bd5d96",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/pos_dict/prob_start.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/pos_dict/prob_trans.utf8",
+    "sha256": "f22363e2307408293d180c6f9f6b5cb75879d52f722f7764fa2d3d0ae2400236",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/pos_dict/prob_trans.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/README.md",
+    "sha256": "8bcc7c2ed7dff082d9a99c09de0bfd72249bf3b5c4298a3af328da40cbd8cfd1",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/README.md",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/stop_words.utf8",
+    "sha256": "b788b8a939d2e2fe079abd579ea98f12f9fb84370bfd0dddd81bb9381f7ab42c",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/stop_words.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/dict/user.dict.utf8",
+    "sha256": "5faabcd0c52adf512de77fd7eee3d556da8c98b50f493b47c66a981b3a24959c",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/dict/user.dict.utf8",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/lexicon.txt",
+    "sha256": "b4530b7bcd98131c72881c8813d0246377aecdab81866e3fae4025a94aa98e53",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/lexicon.txt",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/model-steps-3.onnx",
+    "sha256": "ef7ebdf5987e16a5836136a51d6f3560ca997ffd33d06a40daab5af92b4b86e5",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/model-steps-3.onnx",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/number.fst",
+    "sha256": "743f402181fcfebf76cc2f0546b71fa26476e626fbe4e460fb7b4c3a7a8bd5bd",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/number.fst",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/phone.fst",
+    "sha256": "1ac2b6fa56b1442320c4de7db08353bab8963a2b57f365eebcdd3a2d3562f8d7",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/phone.fst",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/README.md",
+    "sha256": "beb8857418f3419f51c8452cbe8cde2af35d794f9db64b436db1764d211fb6e5",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/README.md",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/tokens.txt",
+    "sha256": "56209b2bf609d5ac1d66ede6dae7bf5254bd3f8aa24c4a6823713d5b884d87ba",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/tokens.txt",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/models/tts/matcha-icefall-zh-baker/vocos-22khz-univ.onnx",
+    "sha256": "0574a135aa1db2de6e181050db2ec528496cacd4a4701fc5d7faf9f9804c0081",
+    "destination": "assets/models/tts/matcha-icefall-zh-baker/vocos-22khz-univ.onnx",
+    "category": "model asset"
+  },
+  {
+    "source": "b31/2/myangle.py",
+    "sha256": "900e7712925c439881eb70a63b24fce1d77acb43358205711deb2b3b8322cbf3",
+    "destination": "legacy/b31/2/myangle.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/playball.py",
+    "sha256": "edb462f933d10ee9c126b4cd9b145184aa497dd77745d5c9b235b46141e7d2ce",
+    "destination": "legacy/b31/2/playball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/qr_route_image.py",
+    "sha256": "711d3fd74ca8876bd8186f56bf186982360688bb527c1a911ce0ccaddfb11c79",
+    "destination": "hardware/qr_route_image.py",
+    "category": "active hardware"
+  },
+  {
+    "source": "b31/2/README-voice.md",
+    "sha256": "437b8383283277eff9e948f7353644ed742029b011dc7d29231af0039871d684",
+    "destination": "legacy/b31/2/README-voice.md",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/requirements-voice.txt",
+    "sha256": "98b43c05d2fd81145b6674fc713d539873ca79eee30b03769a150a51ec8968c4",
+    "destination": "legacy/b31/2/requirements-voice.txt",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/robotbarcode.py",
+    "sha256": "39610b6b15fc31f5bee00f39ebb06fe804e6188a6f18fdb52658f755fa369ab1",
+    "destination": "hardware/robotbarcode.py",
+    "category": "active hardware"
+  },
+  {
+    "source": "b31/2/RobotEnum.py",
+    "sha256": "e70e5146b01a92cda3442c320eac5940a03afda08efea29519ab2b34e69089ee",
+    "destination": "legacy/b31/2/RobotEnum.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/roboteye.py",
+    "sha256": "320928a65d8fbb334aee1f065a3b516127e93d7cb3a6b85114334affbbf8e236",
+    "destination": "hardware/roboteye.py",
+    "category": "active hardware"
+  },
+  {
+    "source": "b31/2/robotmove.py",
+    "sha256": "4b98bed57704d884bafe054afccf288a162c4d4d438e996bbee8d23fa4deb682",
+    "destination": "hardware/robotmove.py",
+    "category": "active hardware"
+  },
+  {
+    "source": "b31/2/round_object.py",
+    "sha256": "16b4d5079f62c1600deaf4d3cefd4f3058a9d19bb73af23feb4cd587831f286a",
+    "destination": "hardware/round_object.py",
+    "category": "active hardware"
+  },
+  {
+    "source": "b31/2/touying.py",
+    "sha256": "3f54b717c36d331a47eecdb464c72289da684071e45045eac38ea29d28484638",
+    "destination": "legacy/b31/2/touying.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/voice_control.py",
+    "sha256": "9311bad939756dc695c7f1f135c67c57d9aa5ebe5b32c72311ab22112647425f",
+    "destination": "legacy/b31/2/voice_control.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/2/zhuiqiu.py",
+    "sha256": "b3257865ee8f0fc7696c7372951d8b8259d8a5eda0fcc3d35c0281490ef8312c",
+    "destination": "legacy/b31/2/zhuiqiu.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "b31/dance.mp3",
+    "sha256": "abeacdf122a88389236e5f6f85ea10358b3a65be9b800c52fec694238a535af6",
+    "destination": "assets/music/dance.mp3",
+    "category": "music asset"
+  },
+  {
+    "source": "b31/Line/img/ballhsv.json",
+    "sha256": "42ea5aef642f0c7fb660f6f637639976aba1d24b74f532a529e05f84db2165db",
+    "destination": "assets/hsv/ballhsv.json",
+    "category": "calibration asset"
+  },
+  {
+    "source": "b31/Line/img/blackhsv.json",
+    "sha256": "170295ac5c3b3cb5e5bce8defdce1b1ea6edf38dcda5242443d8d0f51f98cd70",
+    "destination": "assets/hsv/blackhsv.json",
+    "category": "calibration asset"
+  },
+  {
+    "source": "b31/Line/img/bluehsv.json",
+    "sha256": "71c2634e02dd8a3b301ab363b6fb2aa1a0db7ee028832e63257ad3995c218f04",
+    "destination": "assets/hsv/bluehsv.json",
+    "category": "calibration asset"
+  },
+  {
+    "source": "b31/Line/img/bluehsv2.json",
+    "sha256": "de5a5d59a477bdfdb6a0893bead02ce51ccba680df708d10b59d7af31dc3746f",
+    "destination": "assets/hsv/bluehsv2.json",
+    "category": "calibration asset"
+  },
+  {
+    "source": "b31/Line/img/greenhsv.json",
+    "sha256": "a1efd713dc064947b216895d6957529464c600620249c9cda47309dfa1276de2",
+    "destination": "assets/hsv/greenhsv.json",
+    "category": "calibration asset"
+  },
+  {
+    "source": "b31/Line/img/redhsv.json",
+    "sha256": "bcebd87268a1053d2e0f3e3f8ad0e8990bee049b170bc675c42038590468e760",
+    "destination": "assets/hsv/redhsv.json",
+    "category": "calibration asset"
+  },
+  {
+    "source": "b31/Line/img/yellowhsv.json",
+    "sha256": "79172b960d0a86519aea5c8a7b6aa68e4c41ae9d61f5741b536eaae78906c361",
+    "destination": "assets/hsv/yellowhsv.json",
+    "category": "calibration asset"
+  },
+  {
+    "source": "carry_main.py",
+    "sha256": "6360ac97f4ff132915bc0f749f5ac6c2ce82a22a9708fe552dfcb90bcf6558a9",
+    "destination": "app/carry_main.py",
+    "category": "active application"
+  },
+  {
+    "source": "chinese_speech.py",
+    "sha256": "e204035b31a21407bf60cdf3e24c913a6060014de62a76bde6570c292567ab51",
+    "destination": "app/chinese_speech.py",
+    "category": "active application"
+  },
+  {
+    "source": "dance_main.py",
+    "sha256": "db2a5e841c3d8452c10c4acb8ba8e31bac92e21fece090513e091994c65971a7",
+    "destination": "app/dance_main.py",
+    "category": "active application"
+  },
+  {
+    "source": "emotion_main.py",
+    "sha256": "b7bccb67ae6b1052d60c1fe1efc346736bdf6f32e6072dc439673a81fa591d48",
+    "destination": "app/emotion_main.py",
+    "category": "active application"
+  },
+  {
+    "source": "face_main.py",
+    "sha256": "085765122891d86ec45b8c2cd93abb44521d8b343cceea11b75a41f9c4469e8e",
+    "destination": "app/face_main.py",
+    "category": "active application"
+  },
+  {
+    "source": "install_autostart.sh",
+    "sha256": "df7c8c8377605ad0500bec9798c70cd8c614f6db00e6e9bab81622b130dfcb43",
+    "destination": null,
+    "category": "startup installer omitted by user request"
+  },
+  {
+    "source": "kick_main.py",
+    "sha256": "cde2e70f7ec319770b8d1f3e3eb885c81201bb0e1a4b3840c1d9f950c17f7ac2",
+    "destination": "app/kick_main.py",
+    "category": "active application"
+  },
+  {
+    "source": "main.py",
+    "sha256": "9cfe46bdb0346e02b2d02283656800ff07f4d63dd139020fcb3a80253df58908",
+    "destination": "legacy/main.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "neural_chinese_voice.zip",
+    "sha256": "354ff5fb56dc3624eaa9e7cbc4e0903df929ad1e4e0daab048fc0fc407b335eb",
+    "destination": null,
+    "category": "installation archive omitted; model files retained"
+  },
+  {
+    "source": "qr_main.py",
+    "sha256": "4547d951b57c3f33c85872b43c0b7393c2af7c9061c986b67213a1887f0c57e6",
+    "destination": "app/qr_main.py",
+    "category": "active application"
+  },
+  {
+    "source": "requirements.txt",
+    "sha256": "b0a4a786a12901ef8a13b85fabfdaaa810d59aef5a1f8dc5fc4f5202a42ea6ee",
+    "destination": "requirements.txt",
+    "category": "dependencies"
+  },
+  {
+    "source": "robot/b31/2/ball.py",
+    "sha256": "5c9c2cbbd92331bb9ca394c7c4011693afb9ca9a7e3bbab80c02d5eab91ea694",
+    "destination": "legacy/robot/b31/2/ball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/basedata.py",
+    "sha256": "e593ed640b101a9a9df790fd73fdcefa54f348664a8a7ebb529e23cf311c157c",
+    "destination": "legacy/robot/b31/2/basedata.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/colorhsv_mouse.py",
+    "sha256": "0864a8c05566a17ea3ca779844d0b8827bb62922227ba5706edec2d7a4c9ef57",
+    "destination": "legacy/robot/b31/2/colorhsv_mouse.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/colorhsv_mouse_use.py",
+    "sha256": "c3d7f57e629cded94c8129a2a06e687927af1e02b4449e68f719440745fe3f59",
+    "destination": "legacy/robot/b31/2/colorhsv_mouse_use.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/colorhsv_mousetest.py",
+    "sha256": "dd51d42e311a1235df3019d102b3823b664a51c2af03c3a5974785543fa2a54c",
+    "destination": "legacy/robot/b31/2/colorhsv_mousetest.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/dance.py",
+    "sha256": "b4a390c44448ea1b1c81ca09bcbbfeb42fd5f71764f85db8681295cbe1b70e61",
+    "destination": "legacy/robot/b31/2/dance.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/data/faces/README.md",
+    "sha256": "16b6f14165fc75c3d4a07d8fff091a93e99eb7a3044e5d911b64cbe32621a6dc",
+    "destination": "legacy/robot/b31/2/data/faces/README.md",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/day.py",
+    "sha256": "695a584d9df4ab5fa21d2162232746a755245974c460f9c22ce25ffb45308ed8",
+    "destination": "legacy/robot/b31/2/day.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/day2.py",
+    "sha256": "61f4d445c58cc2ccbfaf2b824a95fc5a980db72ce2c48854b416a60749aec836",
+    "destination": "legacy/robot/b31/2/day2.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/day3.py",
+    "sha256": "5ccba4bd804178171b8e4dc3b8dfb181c9a76913ae862cbae27783849c55fa09",
+    "destination": "legacy/robot/b31/2/day3.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/day3new.py",
+    "sha256": "65749362ce1694422c066085f8ba59083920670f1acee258e92212345f1aad2a",
+    "destination": "legacy/robot/b31/2/day3new.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/face_eim.py",
+    "sha256": "d8e6a708cd3ea3fc599d77a9f23bdb377c5e82e37be06c98e6bd235e67893add",
+    "destination": "legacy/robot/b31/2/face_eim.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/findball.py",
+    "sha256": "8a198038f9145db209d04b91a5e2cafbaf838640153d04cec2bb5daeabcd6e42",
+    "destination": "legacy/robot/b31/2/findball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/findbox.py",
+    "sha256": "34cb0a23fbb0e628ea6013c87000b71fb8387ad2e40a727b41c90624fd84369e",
+    "destination": "legacy/robot/b31/2/findbox.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/findrectangle.py",
+    "sha256": "2b7fc31d910f12c51e998aeeb43380544f15f58927845d1d20493864caa6c348",
+    "destination": "legacy/robot/b31/2/findrectangle.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/haar/haarcascade_eye.xml",
+    "sha256": "71cc64fc305a355dc60067880f6fbbd43dd155bd63ee3844661a1bda34b2fd8c",
+    "destination": "legacy/robot/b31/2/haar/haarcascade_eye.xml",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/haar/haarcascade_frontalface_default.xml",
+    "sha256": "0f7d4527844eb514d4a4948e822da90fbb16a34a0bbbbc6adc6498747a5aafb0",
+    "destination": "legacy/robot/b31/2/haar/haarcascade_frontalface_default.xml",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/haar/lebo.py",
+    "sha256": "e2a5cecb770eae1ed3c251947dd48af962bdc56355a7bb948168941473b81d9a",
+    "destination": "legacy/robot/b31/2/haar/lebo.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/Head.py",
+    "sha256": "0ce59d89681f83111bb145c380fcfef8a31340a99457d3d8636501e9900f7b5e",
+    "destination": "legacy/robot/b31/2/Head.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/headservo.py",
+    "sha256": "0d938606abbeeb763b4e23049ff836714c476e898877c2949c1a916a623ea1bc",
+    "destination": "legacy/robot/b31/2/headservo.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/holdbox.py",
+    "sha256": "363af7190695bdc9b83f1d82f5abc8e64681579593399b1188f876aae13f791b",
+    "destination": "legacy/robot/b31/2/holdbox.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/holdbox2.py",
+    "sha256": "24b7376688c66ba850fab407c2e49566f140c39eeaf87939794a2d06488900ad",
+    "destination": "legacy/robot/b31/2/holdbox2.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/holdbox2NEW.py",
+    "sha256": "b69ded7c8bde7d06c86f6fd4428372a1ad867c730dbda8118be509daa1f288ee",
+    "destination": "legacy/robot/b31/2/holdbox2NEW.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/install_face_model.sh",
+    "sha256": "93229b0686e1e2afe8c6c087056bb7c59f6386d45baa419f92b679453aee461e",
+    "destination": "legacy/robot/b31/2/install_face_model.sh",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/models/face/face.eim",
+    "sha256": "b1a3ded610fcb19925f72e96a1d4d83f3b2949d96a357d418da3938d04b8a6e0",
+    "destination": "legacy/robot/b31/2/models/face/face.eim",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/models/face/README.md",
+    "sha256": "fc0cdf4a6c8ce4d09e4fe4103c3a9753e757b2a1385759648cbce98fd876898d",
+    "destination": "legacy/robot/b31/2/models/face/README.md",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/myangle.py",
+    "sha256": "900e7712925c439881eb70a63b24fce1d77acb43358205711deb2b3b8322cbf3",
+    "destination": "legacy/robot/b31/2/myangle.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/playball.py",
+    "sha256": "edb462f933d10ee9c126b4cd9b145184aa497dd77745d5c9b235b46141e7d2ce",
+    "destination": "legacy/robot/b31/2/playball.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/qr_route_image.py",
+    "sha256": "11605d3877983b894b92ff49a6c012aea773db8365af68f9a482f70de3fecc1f",
+    "destination": "legacy/robot/b31/2/qr_route_image.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/README-voice.md",
+    "sha256": "437b8383283277eff9e948f7353644ed742029b011dc7d29231af0039871d684",
+    "destination": "legacy/robot/b31/2/README-voice.md",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/requirements-voice.txt",
+    "sha256": "98b43c05d2fd81145b6674fc713d539873ca79eee30b03769a150a51ec8968c4",
+    "destination": "legacy/robot/b31/2/requirements-voice.txt",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/robotbarcode.py",
+    "sha256": "39610b6b15fc31f5bee00f39ebb06fe804e6188a6f18fdb52658f755fa369ab1",
+    "destination": "legacy/robot/b31/2/robotbarcode.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/RobotEnum.py",
+    "sha256": "e70e5146b01a92cda3442c320eac5940a03afda08efea29519ab2b34e69089ee",
+    "destination": "legacy/robot/b31/2/RobotEnum.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/roboteye.py",
+    "sha256": "3b323ca710496a506cfc6205e9dfb5c37d1e4690d8be31ae0463c533af072021",
+    "destination": "legacy/robot/b31/2/roboteye.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/robotmove.py",
+    "sha256": "3e675288596878a46516ffd83c209e39ae33b0b38868a210f513f4c0bc0c34b5",
+    "destination": "legacy/robot/b31/2/robotmove.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/touying.py",
+    "sha256": "3f54b717c36d331a47eecdb464c72289da684071e45045eac38ea29d28484638",
+    "destination": "legacy/robot/b31/2/touying.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/voice_control.py",
+    "sha256": "9311bad939756dc695c7f1f135c67c57d9aa5ebe5b32c72311ab22112647425f",
+    "destination": "legacy/robot/b31/2/voice_control.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/2/zhuiqiu.py",
+    "sha256": "b3257865ee8f0fc7696c7372951d8b8259d8a5eda0fcc3d35c0281490ef8312c",
+    "destination": "legacy/robot/b31/2/zhuiqiu.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/dance.mp3",
+    "sha256": "abeacdf122a88389236e5f6f85ea10358b3a65be9b800c52fec694238a535af6",
+    "destination": "legacy/robot/b31/dance.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/Line/img/ballhsv.json",
+    "sha256": "42ea5aef642f0c7fb660f6f637639976aba1d24b74f532a529e05f84db2165db",
+    "destination": "legacy/robot/b31/Line/img/ballhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/Line/img/blackhsv.json",
+    "sha256": "170295ac5c3b3cb5e5bce8defdce1b1ea6edf38dcda5242443d8d0f51f98cd70",
+    "destination": "legacy/robot/b31/Line/img/blackhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/Line/img/bluehsv.json",
+    "sha256": "71c2634e02dd8a3b301ab363b6fb2aa1a0db7ee028832e63257ad3995c218f04",
+    "destination": "legacy/robot/b31/Line/img/bluehsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/Line/img/bluehsv2.json",
+    "sha256": "de5a5d59a477bdfdb6a0893bead02ce51ccba680df708d10b59d7af31dc3746f",
+    "destination": "legacy/robot/b31/Line/img/bluehsv2.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/Line/img/greenhsv.json",
+    "sha256": "a1efd713dc064947b216895d6957529464c600620249c9cda47309dfa1276de2",
+    "destination": "legacy/robot/b31/Line/img/greenhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/Line/img/redhsv.json",
+    "sha256": "bcebd87268a1053d2e0f3e3f8ad0e8990bee049b170bc675c42038590468e760",
+    "destination": "legacy/robot/b31/Line/img/redhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/b31/Line/img/yellowhsv.json",
+    "sha256": "79172b960d0a86519aea5c8a7b6aa68e4c41ae9d61f5741b536eaae78906c361",
+    "destination": "legacy/robot/b31/Line/img/yellowhsv.json",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/kick_main.py",
+    "sha256": "92f8d660decd938601e15972248e7c0287cc30a45077f4e17b4f46e6552aa77a",
+    "destination": "legacy/robot/kick_main.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/main_1.py",
+    "sha256": "4477cb17210ae91f218067dc5bf6f50171eb04a5bd1e50c3c2d0ec204b303a6e",
+    "destination": "legacy/robot/main_1.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/qr_main.py",
+    "sha256": "57231ac9d0da9f5d0068ea7de98f5edbbdd05edd999957e3c3b84955c7272c02",
+    "destination": "legacy/robot/qr_main.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/准备搬运 (1).mp3",
+    "sha256": "088b19446898fd18912b7fecd76bcdfa8bb884f27c27388e34819d431c99f72d",
+    "destination": "legacy/robot/语音包/准备搬运 (1).mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/准备跳舞.mp3",
+    "sha256": "eb86e9094fc274baaa4a17b9767e116edac3a090c8b2148a24a6042159df6d52",
+    "destination": "legacy/robot/语音包/准备跳舞.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/开头.mp3",
+    "sha256": "2eef48cbbba1e54e80d40fb3be8c84210c7e5be4f65b4875ff0a54a5613d8863",
+    "destination": "legacy/robot/语音包/开头.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/开始搬运.mp3",
+    "sha256": "c4ae94dd9860c5ca4f2a0d24adbeb81d3b35dfdbaaf754222a005f8639fbe254",
+    "destination": "legacy/robot/语音包/开始搬运.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/扫码成功开始搬运_1.mp3",
+    "sha256": "38e9aba99954bcb94373f01d9eeb988235d87fd6fd26d0790ff3fa4ca0dd0ac3",
+    "destination": "legacy/robot/语音包/扫码成功开始搬运_1.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/搬运完成准备踢球.mp3",
+    "sha256": "02eca8e0b71905d424aea0158481f707aaed073b93662dce7a437ee44364c99b",
+    "destination": "legacy/robot/语音包/搬运完成准备踢球.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/语音包/准备搬运 (1).mp3",
+    "sha256": "088b19446898fd18912b7fecd76bcdfa8bb884f27c27388e34819d431c99f72d",
+    "destination": "legacy/robot/语音包/语音包/准备搬运 (1).mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/语音包/准备跳舞.mp3",
+    "sha256": "eb86e9094fc274baaa4a17b9767e116edac3a090c8b2148a24a6042159df6d52",
+    "destination": "legacy/robot/语音包/语音包/准备跳舞.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/语音包/开头.mp3",
+    "sha256": "2eef48cbbba1e54e80d40fb3be8c84210c7e5be4f65b4875ff0a54a5613d8863",
+    "destination": "legacy/robot/语音包/语音包/开头.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/语音包/开始搬运.mp3",
+    "sha256": "c4ae94dd9860c5ca4f2a0d24adbeb81d3b35dfdbaaf754222a005f8639fbe254",
+    "destination": "legacy/robot/语音包/语音包/开始搬运.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/语音包/扫码成功开始搬运_1.mp3",
+    "sha256": "38e9aba99954bcb94373f01d9eeb988235d87fd6fd26d0790ff3fa4ca0dd0ac3",
+    "destination": "legacy/robot/语音包/语音包/扫码成功开始搬运_1.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/语音包/搬运完成准备踢球.mp3",
+    "sha256": "02eca8e0b71905d424aea0158481f707aaed073b93662dce7a437ee44364c99b",
+    "destination": "legacy/robot/语音包/语音包/搬运完成准备踢球.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/语音包/跳舞bgm.mp3",
+    "sha256": "54952ae863bf13ac9c051b262e5a3dfab4299b61f40dc1f1d29d6c8393ebf6cf",
+    "destination": "legacy/robot/语音包/语音包/跳舞bgm.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "robot/语音包/跳舞bgm.mp3",
+    "sha256": "54952ae863bf13ac9c051b262e5a3dfab4299b61f40dc1f1d29d6c8393ebf6cf",
+    "destination": "legacy/robot/语音包/跳舞bgm.mp3",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "serial_monitor.py",
+    "sha256": "edbec4bfa2c00c05568be3f9886a946fa93698f83e04699a8f5151749fb6357f",
+    "destination": "app/serial_monitor.py",
+    "category": "active application"
+  },
+  {
+    "source": "test_chinese_speech.py",
+    "sha256": "e10d3df8a1eb3210657b2ba60f8f741c0350a816cf9e8550ed8d65288e25c46e",
+    "destination": "tests/test_chinese_speech.py",
+    "category": "tests"
+  },
+  {
+    "source": "test_qr_routes.py",
+    "sha256": "ccf0fa515803e9ff24c5846de82ccb95d248ce36bcd603bb42fc181716926500",
+    "destination": "tests/test_qr_routes.py",
+    "category": "tests"
+  },
+  {
+    "source": "voice_main.py",
+    "sha256": "9ee3b7339b1899f1d2a4f56b2c10ff7af7135806a1170d5dd54e950015153e00",
+    "destination": "app/voice_main.py",
+    "category": "active application"
+  },
+  {
+    "source": "动作/forward.dzz",
+    "sha256": "50a29c8d540af5d6c947108760613b288354e2bc6dd4f15f0290823ce7391ce0",
+    "destination": "assets/actions/forward.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/L踢球.dzz",
+    "sha256": "b5d6cc6ddffa47272924427494fd19d722617711104a906f52df6e376d2cfc5d",
+    "destination": "assets/actions/L踢球.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/R踢球.dzz",
+    "sha256": "40a41adf44e93712db0cf4c2f2a147868884ef6d3d0653105009486b304b933b",
+    "destination": "assets/actions/R踢球.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/右平移.dzz",
+    "sha256": "013d1788512a77be2321bd81c5dc58b587f512814911de2e4ad1d66810e7bedc",
+    "destination": "assets/actions/右平移.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/右转.dzz",
+    "sha256": "4a3a603c56038cf4e520aa827198f5ade5d98b5c8fe89babf0fdb058286de513",
+    "destination": "assets/actions/右转.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/后退.dzz",
+    "sha256": "a6d315482ebe786f762cbd26468ec4889fc239930246afb3be596bfeb848690a",
+    "destination": "assets/actions/后退.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/左平移.dzz",
+    "sha256": "95c262744ceab5dd71644e8e6edd87e1c8f245c5f139af046086ec72a57d77a0",
+    "destination": "assets/actions/左平移.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/左转.dzz",
+    "sha256": "d648caa13f878ec75376aab99b9741f5af34885c49a041beebef01022977056f",
+    "destination": "assets/actions/左转.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/抱低处物块.dzz",
+    "sha256": "b906806df01035c5b1e76dd87eeb6a0a0224e7be620f14adbb1475b87513ee5f",
+    "destination": "assets/actions/抱低处物块.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/搬运右转.dzz",
+    "sha256": "3f77a944bde140718e6f0ad33bd7740fcca41d6fa124f231f266baf683f0c542",
+    "destination": "assets/actions/搬运右转.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/搬运左转.dzz",
+    "sha256": "bdabd84b4bd2eb25fe8f707773988e8995e03928371672f1bbe876afa2397441",
+    "destination": "assets/actions/搬运左转.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/搬运行走.dzz",
+    "sha256": "6f51cf953738f69230f79314e5a1daeb4df2031b630b9dfd28b6701cdd7a6f7f",
+    "destination": "assets/actions/搬运行走.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/智能版人形跳舞1.dzz",
+    "sha256": "43a672feaf62f6d006028fec98f9f65ac574e066620477407e00f39dd7e4d8ec",
+    "destination": "assets/actions/智能版人形跳舞1.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/智能版人形跳舞2.dzz",
+    "sha256": "a0278c267237f52bab76e0a8552681251b68066c8c9fcc51a0aa7ebdeb084950",
+    "destination": "assets/actions/智能版人形跳舞2.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/智能版人形跳舞3.dzz",
+    "sha256": "70952e5abb079ccc7655679cbf79d336fcf2b9db9711fc1dd056f4cace017868",
+    "destination": "assets/actions/智能版人形跳舞3.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/智能版人形跳舞4.dzz",
+    "sha256": "544b6bc199ccb07fa5704ac12843741478278bf2f72dcd36932076d27db7eb9f",
+    "destination": "assets/actions/智能版人形跳舞4.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/智能版人形跳舞5.dzz",
+    "sha256": "36e027c7b2e831621d9b5bfe0ed85cf66adb950334822cc9ae45443bc6b44b06",
+    "destination": "assets/actions/智能版人形跳舞5.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "动作/松.dzz",
+    "sha256": "0f2f8676ce1e658ec992efdd9b767c5dd3fa524c9b71eb0065724e4e44c29791",
+    "destination": "assets/actions/松.dzz",
+    "category": "motion asset"
+  },
+  {
+    "source": "参考/运动控制/robot_face_recognition.py",
+    "sha256": "a8a46268fc637618dfd8176ea6e26d45927ff268b56c8695872ed6117704514f",
+    "destination": "legacy/参考/运动控制/robot_face_recognition.py",
+    "category": "retained historical reference"
+  },
+  {
+    "source": "本次比赛项目指导_20261002.md",
+    "sha256": "94fd7cc9a0411ee394965679c702a8ada96e71eafc57e614f53c3f3a12b6f1ab",
+    "destination": "docs/本次比赛项目指导_20261002.md",
+    "category": "documentation"
+  },
+  {
+    "source": "语音包/人脸_haowenwan.mp3",
+    "sha256": "4ca0e24e72a688f8e83b7187bccf298ead4f164b094eb29ac8467cb9b3ebf272",
+    "destination": "assets/voice/人脸_haowenwan.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/人脸_wujuncheng.mp3",
+    "sha256": "ea977c6d2570853c51f6f0a4b7e226da66520f0447e6a99367a00550ebe2c365",
+    "destination": "assets/voice/人脸_wujuncheng.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/人脸_xieyuting.mp3",
+    "sha256": "e436039f97e6f0ec5e61b40fdf7da96f10b68aff0a5019cd136e1cc126bf3654",
+    "destination": "assets/voice/人脸_xieyuting.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/人脸_yangchengrui.mp3",
+    "sha256": "b876289904a9b98a60b5347fad540edf7553004bf28bf9b1f6460bc6ce8545b8",
+    "destination": "assets/voice/人脸_yangchengrui.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/人脸_zhaobowen.mp3",
+    "sha256": "24e189643bc60b478a4dca8be0e2124f85188617d2a8c634ae71c1898c8392fe",
+    "destination": "assets/voice/人脸_zhaobowen.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/准备搬运 (1).mp3",
+    "sha256": "088b19446898fd18912b7fecd76bcdfa8bb884f27c27388e34819d431c99f72d",
+    "destination": "assets/voice/准备搬运 (1).mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/准备跳舞.mp3",
+    "sha256": "eb86e9094fc274baaa4a17b9767e116edac3a090c8b2148a24a6042159df6d52",
+    "destination": "assets/voice/准备跳舞.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/唱歌.mp3",
+    "sha256": "c2e8217ba462c1065de469db9fc9b449f756579468c10ebbbe6218ba1d69b2a2",
+    "destination": "assets/voice/唱歌.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/完成_二维码循迹.mp3",
+    "sha256": "0accc2e2c49bd2ede17eedbb09452c523b69e507433c51240512e26579ca2fbb",
+    "destination": "assets/voice/完成_二维码循迹.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/完成_人脸识别.mp3",
+    "sha256": "f80868cc1bca29be15c576b9bd5b2329ea141d36ef9ba09ad105570f746b06c4",
+    "destination": "assets/voice/完成_人脸识别.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/完成_跳舞.mp3",
+    "sha256": "cb295cbf3659513cdec21964038afa506f65243aa70e8764786312153cbb43ff",
+    "destination": "assets/voice/完成_跳舞.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/完成_踢球.mp3",
+    "sha256": "0fb0c20f3e51169abbe8d579ae0861b7b95c4c09a5a30a2b297cc6f57459815b",
+    "destination": "assets/voice/完成_踢球.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/小童已就绪.wav",
+    "sha256": "77d1d2fcb0e150ba2ff0663b3cd1b3c4ef29e7a3dc576bd7804b3e298bb629f8",
+    "destination": "assets/voice/小童已就绪.wav",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/开头.mp3",
+    "sha256": "2eef48cbbba1e54e80d40fb3be8c84210c7e5be4f65b4875ff0a54a5613d8863",
+    "destination": "assets/voice/开头.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/开始搬运.mp3",
+    "sha256": "c4ae94dd9860c5ca4f2a0d24adbeb81d3b35dfdbaaf754222a005f8639fbe254",
+    "destination": "assets/voice/开始搬运.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/情绪_伤心.mp3",
+    "sha256": "5cbfaaff91814f94a8d8951c205781391a8241f1272b6e1cbb559bc7f429b988",
+    "destination": "assets/voice/情绪_伤心.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/情绪_开心.mp3",
+    "sha256": "8939f47df3f6a93c1479d5a09887606dc3534d29537ae21bf4a7987b71afdea7",
+    "destination": "assets/voice/情绪_开心.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/情绪_未看清.mp3",
+    "sha256": "5df9358444ded36b0dddc9a6b1d16e62d86f3973d770632cf8607847e8028828",
+    "destination": "assets/voice/情绪_未看清.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/情绪_识别失败.mp3",
+    "sha256": "138622ab0bfa85500187931c2fc99d39dfffeb6e60be4f2005db71fd1dcd333d",
+    "destination": "assets/voice/情绪_识别失败.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/扫码成功开始搬运_1.mp3",
+    "sha256": "38e9aba99954bcb94373f01d9eeb988235d87fd6fd26d0790ff3fa4ca0dd0ac3",
+    "destination": "assets/voice/扫码成功开始搬运_1.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/搬运完成准备踢球.mp3",
+    "sha256": "02eca8e0b71905d424aea0158481f707aaed073b93662dce7a437ee44364c99b",
+    "destination": "assets/voice/搬运完成准备踢球.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/笑话.mp3",
+    "sha256": "a388996b4062630f400152bd3d513042396f2cd026cb8b90ba0ff6b98fbeaed3",
+    "destination": "assets/voice/笑话.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/识别到二维码开始动作.mp3",
+    "sha256": "d28771bf7fa1611308b5c3c5541e6c3c5d3f8fed042091369a990c11117f0624",
+    "destination": "assets/voice/识别到二维码开始动作.mp3",
+    "category": "audio asset"
+  },
+  {
+    "source": "语音包/跳舞bgm.mp3",
+    "sha256": "54952ae863bf13ac9c051b262e5a3dfab4299b61f40dc1f1d29d6c8393ebf6cf",
+    "destination": "assets/voice/跳舞bgm.mp3",
+    "category": "audio asset"
+  }
+]
