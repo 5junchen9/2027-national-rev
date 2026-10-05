@@ -56,10 +56,11 @@ class WalkKickTests(unittest.TestCase):
         self.assertEqual(self.decide(planner,elapsed=.15),'WAIT')
         self.assertEqual(self.decide(planner,elapsed=.31),'REACQUIRE')
         self.assertEqual(self.decide(planner,elapsed=.8),'WAIT')
-        for elapsed in (1.32,2.33,3.34):
-            self.assertEqual(self.decide(planner,elapsed=elapsed),'LOWER_HEAD')
+        for index in range(80):
+            elapsed = .31+(index+1)*1.51
+            expected = 'LOWER_HEAD' if (index//4)%2 == 0 else 'RAISE_HEAD'
+            self.assertEqual(self.decide(planner,elapsed=elapsed),expected)
             planner.mark_head_search(True,now=planner.started_at+elapsed)
-        self.assertEqual(self.decide(planner,elapsed=4.35),'STOP')
         self.assertEqual(planner.actions,0)
 
     def test_visible_ball_resets_gap_but_belly_loss_never_kicks(self):
@@ -88,10 +89,10 @@ class WalkKickTests(unittest.TestCase):
         planner=WalkKick()
         for elapsed in (0,.15,.31): action=self.decide(planner,elapsed=elapsed,ambiguous=True)
         self.assertEqual(action,'REACQUIRE')
-        self.assertEqual(self.decide(planner,elapsed=1.32,ambiguous=True),'LOWER_HEAD')
-        planner.mark_head_search(False,now=planner.started_at+1.32)
-        self.assertEqual(planner.search_head_moves,3)
-        self.assertEqual(self.decide(planner,elapsed=2.33,ambiguous=True),'STOP')
+        self.assertEqual(self.decide(planner,elapsed=1.82,ambiguous=True),'LOWER_HEAD')
+        planner.mark_head_search(False,now=planner.started_at+1.82)
+        self.assertEqual(planner.search_head_direction,-1)
+        self.assertEqual(self.decide(planner,elapsed=3.33,ambiguous=True),'RAISE_HEAD')
 
     def test_belly_alignment_and_horizontal_flip(self):
         for flip,expected in [('none','SIDE_LEFT'),('1','SIDE_RIGHT')]:
@@ -137,15 +138,15 @@ class WalkKickTests(unittest.TestCase):
 
     def test_lost_ball_cannot_blind_walk_without_goal(self):
         planner=WalkKick();planner.search_stage='VISUAL';planner.search_head_moves=3
-        self.assertEqual(self.decide(planner,elapsed=2,goal=None),'STOP')
+        self.assertEqual(self.decide(planner,elapsed=2,goal=None),'LOWER_HEAD')
         self.assertEqual(planner.blind_steps,0)
 
-    def test_action_count_and_deadline_stop(self):
+    def test_action_count_stops_body_but_elapsed_time_does_not_stop_search(self):
         planner=WalkKick();planner.actions=30
         self.assertEqual(self.decide(planner,head=(290,200,60,60)),'STOP')
         planner=WalkKick()
         self.assertEqual(planner.decide('HEAD',None,None,0,0,(480,640),'0',
-                                        now=planner.started_at+121),'STOP')
+                                        now=planner.started_at+600),'WAIT')
 
     def test_box_grows_three_percent_without_changing_saved_reference(self):
         expanded=enlarged_reference(self.reference)
@@ -187,8 +188,7 @@ class WalkKickTests(unittest.TestCase):
         head_tracker=tracker(None if scenario != 'walk_then_disconnect' else (290,200,60,60))
         belly_tracker=tracker((256,96,128,96) if scenario not in ('walk_then_disconnect','startup_no_ball','search_stop') else None)
         if scenario == 'partial_handover':
-            belly_tracker.score=.45
-            belly_tracker.partial=True
+            belly_tracker.score=.8
             belly_tracker.stable_frames=1
         if scenario == 'walk_then_disconnect':
             def disconnect_after_move(action):
@@ -209,8 +209,9 @@ class WalkKickTests(unittest.TestCase):
                      'robotmove':types.SimpleNamespace(RobotMove=robot_factory)}), \
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=lambda _: ord('q') if (scenario == 'startup_no_ball'
-                     or (scenario == 'partial_handover' and head.getImage.call_count >= 20)) else -1), \
-                 patch.object(handover_debug.time,'monotonic',side_effect=iter(i*.1 for i in range(2000))):
+                     or (scenario == 'partial_handover' and head.getImage.call_count >= 20)
+                     or (scenario == 'search_stop' and servo.begin_vertical.call_count >= 10)) else -1), \
+                 patch.object(handover_debug.time,'monotonic',side_effect=iter(i*.1 for i in range(10000))):
                 if scenario == 'walk':
                     self.assertFalse(handover_debug.run(actions=True))
                 elif scenario in ('startup_no_ball','partial_handover'):
@@ -227,7 +228,7 @@ class WalkKickTests(unittest.TestCase):
             if scenario == 'partial_handover': servo.begin_vertical.assert_called_once_with(129)
         elif scenario == 'search_stop':
             robot.robotMove.assert_not_called()
-            self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[132,135,138])
+            self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[132,135,138,141,138,135,132,129,132,135])
         elif scenario == 'walk':
             self.assertGreaterEqual(robot.robotMove.call_count,2)
             self.assertLessEqual(robot.robotMove.call_count,30)
@@ -257,23 +258,26 @@ class WalkKickTests(unittest.TestCase):
 
     def test_ball_search_cannot_walk_toward_off_center_goal(self):
         planner=WalkKick();planner.search_stage='VISUAL';planner.search_head_moves=3
-        self.assertEqual(self.decide(planner,elapsed=2,goal=Box(.55,.1,.4,.3)),'STOP')
+        self.assertEqual(self.decide(planner,elapsed=2,goal=Box(.55,.1,.4,.3)),'LOWER_HEAD')
 
     def test_visible_belly_ball_does_not_trigger_lost_ball_search_when_moving(self):
         planner=WalkKick()
         for i in range(50):
             action=planner.decide('BELLY',None,(256,0,128,60),0,1,(480,640),'0',
-                                  now=planner.started_at+i*.1,belly_score=.45,belly_partial=True)
+                                  now=planner.started_at+i*.1,belly_score=.8)
             self.assertEqual(action,'WAIT')
         self.assertEqual(planner.search_stage,'TRACK')
         self.assertEqual(planner.lost_frames,0)
 
-    def test_low_scoring_full_ball_does_not_receive_partial_threshold(self):
+    def test_visible_head_ball_does_not_reset_tracker_or_scan_before_stable(self):
         planner=WalkKick()
-        for elapsed in (0,.15,.31):
-            action=planner.decide('HEAD',None,(256,0,128,60),0,1,(480,640),'0',
-                                  now=planner.started_at+elapsed,belly_score=.45,belly_partial=False)
-        self.assertEqual(action,'REACQUIRE')
+        planner.search_stage='VISUAL'
+        for i in range(100):
+            action=planner.decide('HEAD',(290,200,60,60),None,1,0,(480,640),'0',
+                                  now=planner.started_at+i*.1,head_score=.8)
+            self.assertEqual(action,'WAIT')
+        self.assertEqual(planner.search_stage,'TRACK')
+        self.assertEqual(planner.lost_frames,0)
 
     def test_real_loop_hands_over_partial_ball_without_body_action_or_loss_exit(self):
         self.run_loop('partial_handover')

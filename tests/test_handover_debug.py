@@ -202,7 +202,6 @@ class HandoverTests(unittest.TestCase):
             cv2.circle(bf,(160,y),30,(0,240,210),-1)
             hb=head_tracker.update(hf);bb=belly_tracker.update(bf)
             self.assertIsNotNone(hb);self.assertIsNotNone(bb)
-            self.assertTrue(head_tracker.partial);self.assertTrue(belly_tracker.partial)
             state.step(hb,belly_tracker.frames,240,now=i*.05)
             if belly_tracker.frames >= 5 and belly_tracker.frames < 7:
                 self.assertLess(belly_tracker.stable_frames,5)

@@ -14,7 +14,7 @@ from ball_debug import PatchTracker
 from dual_kick import camera_settings
 from kick_shapes import Box
 from goal_debug import GoalTracker
-from walk_kick import WalkKick, MIN_BALL_SCORE, MIN_PARTIAL_SCORE
+from walk_kick import WalkKick, MIN_BALL_SCORE
 
 BODY_SERIAL_PORT = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0"
 # 修改这里即可调整本流程的初始位置和接管后的回正位置。
@@ -201,7 +201,7 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
     if actions: print('Fixed robot serial:',BODY_SERIAL_PORT)
     print('G=restart head phase; R=unlock trackers; Q=quit. Belly ball follows image center.')
     print('Align goal and ball, walk one action, then observe again.' if actions else 'Move ball by hand from head view into belly view.')
-    if actions: print('Loss recovery: visual search -> bounded head scan; no body search actions.')
+    if actions: print('Loss recovery: visual search -> repeat 4 down / 4 up head moves, 1.5s per pose; Q to quit.')
     print('Saved calibrations are read, not overwritten.')
     print('S=select HEAD ball; B=select BELLY ball. Drag a green ball region, ENTER=confirm, C=cancel.')
     print('Selection freezes the image and head control; R starts a fresh search.')
@@ -247,12 +247,8 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
             # target decisions while the belly continues to track throughout.
             hb = None if head_busy or state.phase != 'HEAD' else ht.update(hf)
             bb = bt.update(bf)
-            head_partial = getattr(ht,'partial',False)
-            belly_partial = getattr(bt,'partial',False)
-            head_minimum = MIN_PARTIAL_SCORE if head_partial else MIN_BALL_SCORE
-            belly_minimum = MIN_PARTIAL_SCORE if belly_partial else MIN_BALL_SCORE
-            if ht.score < head_minimum: hb = None
-            if bt.score < belly_minimum: bb = None
+            if ht.score < MIN_BALL_SCORE: hb = None
+            if bt.score < MIN_BALL_SCORE: bb = None
             if enabled and not head_busy:
                 # 交接看连续识别次数；半球进画面时大小变化，不要求位置已静止。
                 angle = state.step(hb,bt.frames if bb is not None else 0,hf.shape[0])
@@ -305,7 +301,7 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                 cv2.putText(display,body.reason if actions else 'NO WALK / NO KICK',(8,48),0,.5,(255,255,255),1)
                 tracker = ht if name == 'head' else bt
                 cv2.putText(display,tracker.reason,(8,116),0,.43,(255,255,255),1)
-                minimum = head_minimum if name == 'head' else belly_minimum
+                minimum = MIN_BALL_SCORE
                 cv2.putText(display,f'shape score={tracker.score:.2f} minimum={minimum:.2f}',
                             (8,204),0,.43,(255,255,255),1)
                 cv2.putText(display,'R=new search; S=head ROI; B=belly ROI; drag then ENTER',(8,138),0,.43,(255,255,255),1)
@@ -373,19 +369,19 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                                  view['flip'],
                                  head_score=ht.score,belly_score=bt.score,ambiguous=ambiguous,
                                  goal=goal.normalized(hf.shape) if goal is not None else None,
-                                 goal_stable=gt.stable_frames,head_flip=settings['head']['flip'],
-                                 head_partial=head_partial,belly_partial=belly_partial)
+                                 goal_stable=gt.stable_frames,head_flip=settings['head']['flip'])
             if action == 'STOP':
                 print('Body stopped:',body.reason)
                 return False
             if action == 'WAIT':
                 continue
-            if action in ('REACQUIRE','LOWER_HEAD'):
+            if action in ('REACQUIRE','LOWER_HEAD','RAISE_HEAD'):
                 state.phase = 'HEAD'
                 state.reset_follow()
-                if action == 'LOWER_HEAD':
+                if action in ('LOWER_HEAD','RAISE_HEAD'):
                     low,high = sorted((state.up_limit,state.down))
-                    angle = max(low,min(high,state.angle+3*state.direction))
+                    scan_direction = 1 if action == 'LOWER_HEAD' else -1
+                    angle = max(low,min(high,state.angle+3*state.direction*scan_direction))
                     moved = angle != state.angle
                     if moved:
                         state.angle = angle

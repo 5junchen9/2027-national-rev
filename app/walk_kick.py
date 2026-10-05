@@ -2,7 +2,6 @@
 import time
 
 MIN_BALL_SCORE = .55
-MIN_PARTIAL_SCORE = .40  # 已通过圆弧筛选的半球使用独立填充阈值。
 
 def enlarged_reference(reference):
     """以原框中心为基准，宽高各增加3%；画面外部分裁掉。"""
@@ -17,7 +16,7 @@ def enlarged_reference(reference):
 
 
 class WalkKick:
-    """可靠目标驱动动作；丢球先重找、再低头、最后有限前进。"""
+    """可靠目标驱动动作；丢球只用头部反复上下搜索。"""
     def __init__(self):
         self.goal_aligned = False
         self.blind_steps = 0
@@ -31,6 +30,7 @@ class WalkKick:
         self.search_stage = 'TRACK'
         self.search_since = 0.0
         self.search_head_moves = 0
+        self.search_head_direction = 1
 
     def reset_observation(self):
         self.pending = None
@@ -41,6 +41,7 @@ class WalkKick:
         self.lost_since = None
         self.search_stage = 'TRACK'
         self.search_head_moves = 0
+        self.search_head_direction = 1
         self.blind_steps = 0
 
     def search_action(self, now, ambiguous=False):
@@ -56,37 +57,36 @@ class WalkKick:
             self.search_since = now
             self.reason = 'visual reacquisition; hold and observe'
             return 'REACQUIRE'
-        self.reason = 'visual search; waiting for stable target'
-        if now-self.search_since < 1.0:
+        self.reason = 'head search; observe each pose for 1.5 seconds'
+        if now-self.search_since < 1.5:
             return 'WAIT'
-        if self.search_head_moves < 3:
-            self.reason = 'visual search failed; lower head by 3 units'
+        if self.search_head_direction > 0:
+            self.reason = 'ball lost; lower head by 3 units'
             return 'LOWER_HEAD'
-        if ambiguous:
-            self.reason = 'multiple targets after head search; no blind walk'
-            return 'STOP'
-        self.reason = 'head search exhausted; no body search actions'
-        return 'STOP'
+        self.reason = 'ball lost; raise head by 3 units'
+        return 'RAISE_HEAD'
 
     def mark_head_search(self, moved, now=None):
-        # 已到机械限位时跳过剩余低头尝试，仍先等视觉重新确认。
-        self.search_head_moves = self.search_head_moves+1 if moved else 3
+        # 每四次反向；到舵机指令边界也反向，避免一直顶着限位找。
+        self.search_head_moves += 1
+        if not moved or self.search_head_moves >= 4:
+            self.search_head_direction *= -1
+            self.search_head_moves = 0
         self.search_since = time.monotonic() if now is None else now
 
     def decide(self, phase, head_box, belly_box, head_stable, belly_stable,
                shape, flip, now=None, head_score=1.0,
-               belly_score=1.0, ambiguous=False, goal=None, goal_stable=0, head_flip='0',
-               head_partial=False, belly_partial=False):
+               belly_score=1.0, ambiguous=False, goal=None, goal_stable=0, head_flip='0'):
         now = time.monotonic() if now is None else now
         self.goal_aligned = (goal is not None and goal_stable >= 5
                              and abs(goal.cx-.5) <= max(.025,min(.08,goal.width*.22)))
-        if self.actions >= 30 or now-self.started_at >= 120:
-            self.reason = '30 actions / 120 seconds limit'
+        if self.actions >= 30:
+            self.reason = '30 body actions limit'
             return 'STOP'
 
         # 这是颜色区域形状评分，不是经过标定的识别概率。
-        if head_score < (MIN_PARTIAL_SCORE if head_partial else MIN_BALL_SCORE): head_box = None
-        if belly_score < (MIN_PARTIAL_SCORE if belly_partial else MIN_BALL_SCORE): belly_box = None
+        if head_score < MIN_BALL_SCORE: head_box = None
+        if belly_score < MIN_BALL_SCORE: belly_box = None
         if ambiguous:
             return self.search_action(now,ambiguous=True)
 
@@ -101,7 +101,10 @@ class WalkKick:
                 return 'WAIT'
             if head_box is not None:
                 if head_stable < 5:
-                    return self.search_action(now)
+                    self.reset_search()
+                    self.reset_observation()
+                    self.reason = 'head ball visible but moving; wait for confirmation'
+                    return 'WAIT'
                 self.reset_search()
                 x, y, width, height = head_box
                 error_x = (x+width/2)/shape[1]-.5
