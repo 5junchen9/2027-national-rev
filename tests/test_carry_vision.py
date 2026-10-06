@@ -163,7 +163,7 @@ class CarryVisionTests(unittest.TestCase):
                 servo.is_moving.return_value=False
                 def blocks(frame,color,near=False):
                     if near:
-                        return [Box(200,350,200,130)] if clipped_belly else []
+                        return [Box(200,120,200,360) if robot.robotMove.call_count else Box(200,288,200,192)] if clipped_belly else []
                     if not clipped_belly and robot.robotMove.call_count: return []
                     return [Box(200,320,240,160)]
                 path=Path(folder)/'carry.json'
@@ -181,7 +181,7 @@ class CarryVisionTests(unittest.TestCase):
                      patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.2 for i in range(3000))):
                     self.assertEqual(carry_vision.run('blue','DROP',actions=True,robot=robot),clipped_belly)
                 sent = [call.args[0] for call in robot.robotMove.call_args_list]
-                self.assertEqual(sent, ['HOLD_BOX','DOWN_BOX'] if clipped_belly else ['UP_LITTLE']*4)
+                self.assertEqual(sent, ['UP_LITTLE','HOLD_BOX','DOWN_BOX'] if clipped_belly else ['UP_LITTLE']*4)
                 self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],
                                  [120] if clipped_belly else [])
 
@@ -212,6 +212,40 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE','UP_LITTLE','HOLD_BOX','DOWN_BOX'])
+        self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[120])
+
+    def test_qr_search_budget_resets_after_target_returns(self):
+        hf=np.zeros((480,640,3),np.uint8);bf=hf.copy()
+        head,belly,servo,robot=Mock(),Mock(),Mock(),Mock()
+        head.getImage.return_value=(True,hf);belly.getImage.return_value=(True,bf)
+        servo.is_moving.return_value=False
+        def blocks(frame,color,near=False):
+            return [Box(256,240,64,48)] if near else []
+        def read_qr(frame,detector):
+            sent = [call.args[0] for call in robot.robotMove.call_args_list]
+            turns = sent.count('RIGHT_HOLDBOX')
+            if 'UP_HOLDBOX' not in sent and turns >= 2:
+                return [('DROP',Box(256,144,128,96))]
+            if 'UP_HOLDBOX' in sent and turns >= 5:
+                return [('DROP',Box(256,336,128,96))]
+            return []
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'carry.json'
+            path.write_text(json.dumps(dict(version=3,cameras=camera_settings(),head_position=121,
+                                           target_qr='DROP',shapes=dict(head=[480,640],belly=[480,640]),
+                                           pickup=[.4,.5,.1,.1])))
+            with patch.object(carry_vision,'REFERENCE_FILE',path), \
+                 patch.object(carry_vision,'block_quality',return_value=(1.0,1.0)), \
+                 patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
+                 patch.object(carry_vision,'find_blocks',side_effect=blocks), \
+                 patch.object(carry_vision,'read_qr_codes',side_effect=read_qr), \
+                 patch.dict('sys.modules',{'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo)}), \
+                 patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
+                 patch.object(cv2,'waitKey',return_value=-1), \
+                 patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(3000))):
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+        self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
+                         ['HOLD_BOX']+['RIGHT_HOLDBOX']*2+['UP_HOLDBOX']+['RIGHT_HOLDBOX']*3+['DOWN_BOX'])
         self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[120])
 
     def test_visible_head_target_can_approach_five_steps_before_belly_takes_over(self):
@@ -276,7 +310,7 @@ class CarryVisionTests(unittest.TestCase):
         reference = dict(pickup=[.3,.6,.3,.4],pickup_mode='visible_region',
                          pickup_clipped=[False,False,False,True])
         planner = CarryPlanner(reference,'none')
-        self.assertEqual(self.confirmed_action(planner,Box(.3,.6,.3,.4)),'HOLD_BOX')
+        self.assertEqual(self.confirmed_action(planner,Box(.3,.6,.3,.4)),'UP_LITTLE')
         self.assertEqual(planner.decide(None,0),'WAIT')
         # 裁切方式变化不再单独阻止抱取；位置和尺寸仍需在宽松范围内。
         self.assertEqual(self.confirmed_action(planner,Box(.3,.58,.3,.4)),'HOLD_BOX')
@@ -287,14 +321,18 @@ class CarryVisionTests(unittest.TestCase):
             with self.subTest(box=box):
                 planner = CarryPlanner(self.reference(),'none')
                 self.assertEqual(planner.decide(box,1),'WAIT')
-                self.assertEqual(planner.decide(box,2),'HOLD_BOX')
+                self.assertEqual(planner.decide(box,2),'UP_LITTLE')
+                planner.reset_confirmation()
+                close = Box(box.x,.25,box.width,.75)
+                self.assertEqual(planner.decide(close,1),'WAIT')
+                self.assertEqual(planner.decide(close,2),'HOLD_BOX')
 
     def test_copied_field_reference_and_screenshot_region_no_longer_wait(self):
         reference = dict(pickup=[.278125,.1604166667,.446875,.55625])
         planner = CarryPlanner(reference,'none')
         box = Box(218/640,366/480,286/640,114/480)
         self.assertEqual(planner.decide(box,1),'WAIT')
-        self.assertEqual(planner.decide(box,2),'HOLD_BOX')
+        self.assertEqual(planner.decide(box,2),'UP_LITTLE')
         # 更小的盒子到同一个可见底边位置，仍按位置而不是参考宽高判断。
         planner.reset_confirmation()
         small = Box(.4515625,.6366666667,.1,.08)
@@ -327,7 +365,7 @@ class CarryVisionTests(unittest.TestCase):
             if not near: return [Box(288,150,64,48)]
             seen += 1
             if 4 <= seen <= 6: return []
-            return [Box(192,288,192,192)]
+            return [Box(192,120,192,360)] if robot.robotMove.call_count else [Box(192,288,192,192)]
         reference=dict(version=3,cameras=camera_settings(),head_position=121,target_qr='DROP',
                        shapes=dict(head=[480,640],belly=[480,640]),pickup=[.3,.6,.3,.4],
                        pickup_mode='visible_region',pickup_clipped=[False,False,False,True],
@@ -345,7 +383,7 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.02 for i in range(3000))):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
             self.assertEqual(json.loads(path.read_text()),reference)
-        self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],['HOLD_BOX','DOWN_BOX'])
+        self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],['UP_LITTLE','HOLD_BOX','DOWN_BOX'])
         servo.begin_vertical.assert_called_once_with(120)
 
     def test_head_move_keeps_identity_and_recovers_without_overlap(self):
@@ -575,6 +613,60 @@ class CarryVisionTests(unittest.TestCase):
         codes=read_qr_codes(np.zeros((100,200,3),np.uint8),detector)
         self.assertEqual([text for text,_ in codes],['DROP','OTHER'])
         self.assertAlmostEqual(codes[0][1].cx,30,delta=1)
+
+    def test_floor_like_head_region_does_not_beat_actual_box(self):
+        frame = np.zeros((480,640,3),np.uint8)
+        floor,box = Box(25,137,265,148),Box(495,239,130,151)
+        tracker = BlockTracker(recover_head=True)
+        with patch.object(carry_vision,'block_quality',side_effect=[(.56,.616),(.328,.753)]):
+            self.assertEqual(tracker.update([floor,box],frame=frame,color='blue'),box)
+        self.assertEqual(tracker.rejections[floor],'wide floor-like region')
+
+    def test_partial_pickup_requires_upper_edge_at_line_and_has_step_limit(self):
+        planner = CarryPlanner(self.reference(),'none')
+        far = Box(.3,.8,.4,.2)
+        for _ in range(6):
+            self.assertEqual(planner.decide(far,1),'WAIT')
+            self.assertEqual(planner.decide(far,2),'UP_LITTLE')
+            planner.mark_sent('UP_LITTLE')
+        self.assertEqual(planner.decide(far,2),'STOP')
+        close = Box(.3,.3,.4,.7)
+        planner.reset_confirmation()
+        self.assertEqual(planner.decide(close,1),'WAIT')
+        self.assertEqual(planner.decide(close,2),'HOLD_BOX')
+
+    def test_qr_visual_tracking_requires_current_pattern_and_reconfirms_after_move(self):
+        tracker = carry_vision.DestinationTracker()
+        frame = np.zeros((160,240,3),np.uint8)
+        pattern = np.random.default_rng(1).integers(0,256,(40,40,3),dtype=np.uint8)
+        frame[40:80,50:90] = pattern
+        tracker.update([Box(50,40,40,40)],frame=frame,now=0)
+        tracker.after_move()
+        moved = np.zeros_like(frame);moved[65:105,80:120] = pattern
+        for frames in (1,2):
+            self.assertEqual(tracker.update([],frame=moved,now=.1),Box(80,65,40,40))
+            self.assertEqual(tracker.frames,frames)
+            self.assertEqual(tracker.source,'tracked')
+        self.assertIsNone(tracker.update([],frame=np.zeros_like(frame),now=.2))
+        self.assertEqual(tracker.frames,0)
+        self.assertIsNone(tracker.update([],frame=moved,now=4))
+        self.assertIsNone(tracker.update([Box(50,40,40,40),Box(80,65,40,40)],frame=moved,now=4))
+
+    def test_qr_template_does_not_choose_between_identical_patterns(self):
+        tracker = carry_vision.DestinationTracker()
+        frame = np.zeros((160,240,3),np.uint8)
+        pattern = np.random.default_rng(2).integers(0,256,(40,40,3),dtype=np.uint8)
+        frame[40:80,50:90] = pattern
+        tracker.update([Box(50,40,40,40)],frame=frame,now=0)
+        frame[100:140,160:200] = pattern
+        self.assertIsNone(tracker.update([],frame=frame,now=.1))
+
+    def test_qr_center_band_prevents_turning_at_small_position_jitter(self):
+        reference = self.reference();reference.pop('drop')
+        planner = CarryPlanner(reference,'none');planner.phase = 'DELIVER'
+        self.assertEqual(self.confirmed_action(planner,Box(.49,.3,.2,.2)),'UP_HOLDBOX')
+        planner.mark_sent('UP_HOLDBOX')
+        self.assertEqual(self.confirmed_action(planner,Box(.54,.3,.2,.2)),'UP_HOLDBOX')
 
     def reference(self):
         return dict(pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2],drop_head_position=120)
