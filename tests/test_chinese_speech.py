@@ -13,6 +13,17 @@ import chinese_speech as speech
 
 
 class ChineseSpeechTests(unittest.TestCase):
+    def test_face_volume_override_sets_speakers_and_enables_audio_route(self):
+        import robot_audio
+        with patch.object(robot_audio.subprocess, "run") as run:
+            robot_audio.configure(volume=127)
+        controls = {call.args[0][-2]: call.args[0][-1] for call in run.call_args_list}
+        self.assertEqual(controls['name=Speaker Playback Volume'], '127')
+        self.assertEqual(controls['name=Headphone Playback Volume'], '127')
+        self.assertEqual(controls['name=PCM Playback -6dB Switch'], 'off')
+        self.assertEqual(controls['name=Left Output Mixer PCM Playback Switch'], 'on')
+        self.assertEqual(controls['name=Right Output Mixer PCM Playback Switch'], 'on')
+
     def test_chinese_and_valid_pcm(self):
         text = "张三同学，欢迎你；你好，我是小童。"
         audio = types.SimpleNamespace(samples=[0.0, -2.0, 1.0], sample_rate=22050)

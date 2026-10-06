@@ -29,6 +29,14 @@ class _CsiCamera:
         except ImportError as error:
             raise RuntimeError("Install python3-picamera2 with apt and use a "
                                "--system-site-packages venv") from error
+        cameras = Picamera2.global_camera_info()
+        if not 0 <= index < len(cameras):
+            raise ValueError(f"Picamera2未发现腹部相机编号{index}，请先枚举相机，不要猜编号")
+        # camera_num使用返回列表的位置；Num可能是排序前的内部编号。
+        info = cameras[index]
+        if 'usb' in info['Id'].lower() or 'uvc' in info['Model'].lower():
+            raise ValueError(f"腹部csi编号{index}实际指向USB相机：{info['Id']}；"
+                             "不能与头部重复打开，请枚举并选择真实CSI相机")
         self.camera = Picamera2(camera_num=index)
         self.running = False
         try:

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "camera": {
+    "backend": "csi",
+    "device": "0",
+    "flip": "none",
+    "fps": 15.0
+  },
+  "shape": [
+    480,
+    640
+  ],
+  "visible_patch_box": [
+    0.0296875,
+    0.06875,
+    0.6984375,
+    0.9020833333333333
+  ],
+  "patch_file": "right-foot-20261003-140509-043916.png",
+  "score": 0.9937372207641602,
+  "confirmation": "operator placed ball at physically tested right-foot position",
+  "automatic_kick_enabled": false
+}

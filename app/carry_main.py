@@ -92,7 +92,8 @@ if __name__ == "__main__":
             raise SystemExit('--preview 和 --actions 不能同时使用')
         from carry_vision import choose_task, run as run_visual
         color,target_qr = choose_task(args.color,args.target_qr)
-        success = run_visual(color,target_qr,actions=args.actions)
+        from competition_qr import read_codes
+        success = run_visual(color,target_qr,actions=args.actions,qr_reader=read_codes)
     else:
         success = run(CarryConfig(max(0, args.steps)), dry_run=not args.run)
     raise SystemExit(0 if success else 1)

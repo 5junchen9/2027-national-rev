@@ -6,3 +6,6 @@ pyzbar
 six
 sherpa-onnx==1.13.8
 vosk==0.3.45
+# 同学姓名OCR；rapidocr-onnxruntime 1.x不支持Python 3.13。
+rapidocr==2.1.0
+onnxruntime

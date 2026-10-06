@@ -28,7 +28,7 @@ ACTIONS = {
     "SIDE_LEFT": ("左平移.dzz", 1),
     "RIGHT": ("右平移.dzz", 1),
     "SIDE_RIGHT": ("右平移.dzz", 1),
-    "HOLD_BOX": ("抱低处物块.dzz", 1),
+    "HOLD_BOX": ("抱低处物块-减小前倾测试.dzz", 1),
     "DOWN_BOX": ("松.dzz", 1),
     "UP_HOLDBOX": ("搬运行走.dzz", 1),
     "LEFT_HOLDBOX": ("搬运左转.dzz", 1),
@@ -70,6 +70,9 @@ class RobotMove:
         path = os.path.join(ACTION_DIR, filename)
         print("控制--> {}，{}，执行 {} 次".format(action, filename, repeats))
         duration_scale = WALK_DURATION_SCALE if action in STRAIGHT_ACTIONS else None
+        if action == "HOLD_BOX":
+            # 使用实机测试过的600毫秒过渡，不再叠加通用1.5倍时长。
+            duration_scale = 1.0
         for _ in range(repeats):
             self.__controller.play_dzz(path, duration_scale=duration_scale)
             time.sleep(max(0.0, ACTION_INTERVAL_SECONDS))

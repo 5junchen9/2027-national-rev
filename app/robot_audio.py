@@ -36,8 +36,12 @@ def start(path):
     return subprocess.Popen(playback_command(path))
 
 
-def configure():
+def configure(volume=None):
+    if volume is not None and not 0 <= volume <= 127:
+        raise ValueError("Speaker volume must be between 0 and 127")
     for name, value in SETTINGS:
+        if volume is not None and name in ("Speaker Playback Volume", "Headphone Playback Volume"):
+            value = str(volume)
         subprocess.run(["amixer", "-c", CARD, "cset", f"name={name}", value],
                        check=True, timeout=10)
     return True

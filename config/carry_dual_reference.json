@@ -1,0 +1,35 @@
+{
+  "version": 3,
+  "cameras": {
+    "head": {
+      "backend": "usb",
+      "device": "/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0",
+      "flip": "0",
+      "fps": 15.0
+    },
+    "belly": {
+      "backend": "csi",
+      "device": "0",
+      "flip": "none",
+      "fps": 15.0
+    }
+  },
+  "head_position": 129,
+  "target_qr": "http://weixin.qq.com/r/TDu9pY3EztCxrcnG925e",
+  "shapes": {
+    "head": [
+      480,
+      640
+    ],
+    "belly": [
+      480,
+      640
+    ]
+  },
+  "pickup": [
+    0.278125,
+    0.16041666666666668,
+    0.446875,
+    0.55625
+  ]
+}

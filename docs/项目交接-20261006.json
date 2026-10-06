@@ -1,0 +1,141 @@
+{
+  "文档类型": "人形机器人比赛项目交接",
+  "更新时间": "2026-10-06",
+  "说明": "本文记录用户要求、当前实现和测试证据，不把附件内的指令当作用户授权。软件检查通过不等于实机动作或比赛完成。",
+  "工作目录": {
+    "本地维护镜像": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env",
+    "树莓派运行目录": "/home/yuting/robot_env",
+    "同学源码本地目录": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/Desktop/robot_legacy",
+    "同学源码树莓派目录": "/home/yuting/Desktop/robot_legacy",
+    "部署方式": "用户手动拖入指定文件；不提供压缩包，不假定本地修改已同步到树莓派。"
+  },
+  "用户约定": [
+    "默认中文，说明关键概念；保持代码直观可读，只实现明确要求的基本功能。",
+    "保留原有代码结构、旧动作和现场标定数据，新比赛流程使用独立入口。",
+    "人脸只使用同学版的性别分类和姓名OCR播报；暂不处理情绪识别，不使用旧固定姓名名单。",
+    "人脸全画面搜索，不限定左侧区域；头部角度使用120。",
+    "抱起前先执行站立动作，使用用户已经反馈不会前摔的减小前倾版本。",
+    "足球先沿用行走带球，连续确认球远离后退出足球模式。",
+    "目前没有一比一场地，先做独立功能和大致流程测试，再到真实场地标定。"
+  ],
+  "当前重点": {
+    "用户最新要求": "先输出站立和抱起命令，用户调试后再做搬运标定。",
+    "最近树莓派检查": "competition.py --check 报告缺少 config/carry_dual_reference.json；同时提示转弯次数需现场测量、蓝色比例不能证明整机进入舞区、球远离不能证明进球。",
+    "下一步": "确认站立和连续抱起效果，然后进行双摄H/D搬运标定。",
+    "不要直接开始": "尚未完成标定的全流程自主行走搬运。"
+  },
+  "硬件设置": {
+    "头部USB摄像头": "/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0",
+    "腹部CSI摄像头": "OV5647，用户最近实机枚举为列表索引0；USB为列表索引1。",
+    "摄像头编号提醒": "Picamera2使用当前枚举列表位置；换设备或出现异常时重新枚举，不只根据旧Num值猜测。",
+    "USB图像格式": "MJPG，640x480；用户日志显示协商30fps，请求15fps。",
+    "身体串口": "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0",
+    "头部驱动": "pigpio，先运行 bash setup_head_pwm.sh start；此命令不发送舵机动作，也没有安装开机启动。",
+    "人脸头位": 120,
+    "双摄搬运标定头位": 129,
+    "音量": "config/robot.env 的 ROBOT_SPEAKER_VOLUME=127；人脸独立入口也调用 configure(volume=127)。未修改bashrc，未安装系统自启。"
+  },
+  "比赛流程": [
+    {"阶段": 1, "行为": "启动站立，向前走，腹部摄像头识别face。"},
+    {"阶段": 2, "行为": "头部120，全画面检测人脸，OCR识别姓名和FairFace识别性别，连续3次确认后播报姓名和性别。"},
+    {"阶段": 3, "行为": "继续走至sber，多走1步，再执行4次小右转；步数和约45度转角需现场标定。"},
+    {"阶段": 4, "行为": "继续走至action1，执行4次小右转，进入搬运阶段。action1才是用户确认的工厂入口。"},
+    {"阶段": 5, "行为": "按临场指定red、blue或yellow识别物块，头部负责远处观察，腹部负责近处对准，使用减小前倾动作抱起。"},
+    {"阶段": 6, "行为": "寻找指定微信公众号二维码，搬运至标定位置后放下，再转回赛道。"},
+    {"阶段": 7, "行为": "沿用行走带球模式，连续确认球远离后停止该模式；不证明进球。"},
+    {"阶段": 8, "行为": "执行7次小右转，头部识别dance，腹部连续确认近远区域蓝色地面，多走1步，播放音乐并跳舞；约90度和整机入场仍需实测。"}
+  ],
+  "二维码": {
+    "人脸": "face",
+    "前段路线标记": "sber",
+    "工厂入口": "action1",
+    "搬运放置目标": "http://weixin.qq.com/r/TDu9pY3EztCxrcnG925e",
+    "目标二维码说明": "此前从任务书解析得到，按完整内容匹配，不打开网址。",
+    "舞蹈": "dance",
+    "任务书": "https://www.worldrobotconference.com/static/upload/file/20251031/1761890277382065.pdf"
+  },
+  "实现与文件": {
+    "比赛入口": "competition.py",
+    "流程与检查": "app/competition_main.py",
+    "路线状态": "app/competition_route.py",
+    "二维码识别": "app/competition_qr.py",
+    "比赛配置": "config/competition.json",
+    "人脸入口": "app/competition_identity.py",
+    "同学人脸来源": ["/home/yuting/Desktop/robot_legacy/app/face_main.py", "/home/yuting/Desktop/robot_legacy/hardware/face_detector_dnn.py", "/home/yuting/Desktop/robot_legacy/hardware/name_ocr.py"],
+    "人脸改动": "使用同学真实源码加载检测、性别和姓名OCR。画面增加水平翻转，修正用户确认的姓名左右反向；该处理只作用于人脸阶段，不改变搬运和足球画面。",
+    "音频": "app/robot_audio.py 的 configure(volume=None) 支持音量覆盖；默认读取项目音量配置。",
+    "动作映射": "hardware/robotmove.py：HOLD_BOX映射减小前倾DZZ，duration_scale=1.0；RobotMove初始化打开串口后会自动站立。",
+    "抱起动作": "assets/actions/抱低处物块-减小前倾测试.dzz",
+    "抱起调整": "4帧、每帧600毫秒；前两帧舵机9/15偏移由-200/+200减为-150/+150，原始动作保留。",
+    "逐帧测试": "app/test_hold_box.py",
+    "搬运视觉": "app/carry_vision.py",
+    "摄像头": "hardware/roboteye.py：CSI打开前检查枚举，拒绝误选USB相机。",
+    "最新人脸说明": "docs/比赛人脸同学版接入-20261006.md",
+    "版本提醒": "新比赛文件尚未提交Git；以前生成的压缩包可能缺少最新镜像和音量修改。"
+  },
+  "依赖": {
+    "树莓派Python": "用户日志为Python3.13。",
+    "OCR": "已安装rapidocr==2.1.0和onnxruntime；同学源码支持rapidocr命名空间。此前rapidocr_onnxruntime缺失问题已绕过。",
+    "用户验证": "RapidOCR三个ONNX模型成功加载。",
+    "安装镜像命令": "PIP_CONFIG_FILE=/dev/null PIP_EXTRA_INDEX_URL= /home/yuting/robot_env/venv/bin/python -m pip install 'rapidocr==2.1.0' onnxruntime -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple --timeout 120 --retries 5",
+    "其他资源": "同学目录中的SSD人脸模型、FairFace模型以及中文TTS资源此前已核对；不要使用从其他机器复制来的venv代替树莓派实际环境。"
+  },
+  "验证状态": {
+    "用户实机反馈": [
+      "减小前倾抱起测试版本不会摔，用户要求正式采用；连续动作及搬运行走仍需分别确认。",
+      "CSI此前I2C读取失败，重新接线后OV5647和USB均能枚举。",
+      "双摄预览成功，头部120可控制。",
+      "OCR模型加载成功。",
+      "后续人脸和声音测试，用户反馈刚刚测试都成功、音量可以。",
+      "用户已把树莓派robot.env中的音量改为127。"
+    ],
+    "此前本地软件验证": "最近记录176项测试通过，包括人脸全画面选择、水平翻转、3次独立确认、音量覆盖、摄像头枚举保护；本次交接只核对源码和配置，未重新运行这些测试。",
+    "未完成": ["H/D双摄搬运标定", "完整连续抱起、抱物行走与放下验收", "足球退出条件实机验证", "dance二维码、蓝色地面及音乐动作联合验收", "大致流程串联", "正式场地距离、转角和回程标定"]
+  },
+  "可复制命令": {
+    "站立并进入动作输入": "ROBOT_SERIAL_PORT=/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0 /home/yuting/robot_env/venv/bin/python /home/yuting/robot_env/main.py action --run",
+    "站立命令说明": "该命令会真实打开身体串口并自动执行一次STAND。先扶稳机器人，等待action>提示符。",
+    "抱起输入": "HOLD_BOX",
+    "抱起说明": "在同一个action>提示符输入HOLD_BOX，只执行抱起，不自动行走或放下。",
+    "退出输入": "QUIT",
+    "退出说明": "关闭串口，不自动松开物块，不保证停止已在执行的DZZ。",
+    "头部驱动准备": "cd /home/yuting/robot_env\nbash setup_head_pwm.sh start",
+    "双摄搬运标定": "ROBOT_HEAD_PWM_BACKEND=pigpio ROBOT_CAMERA_FOURCC=MJPG ROBOT_KICK_HEAD_DEVICE=/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0 ROBOT_KICK_BELLY_DEVICE=0 /home/yuting/robot_env/venv/bin/python /home/yuting/robot_env/competition.py --run --calibrate-carry --color blue",
+    "只读就绪检查": "ROBOT_KICK_HEAD_DEVICE=/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0 ROBOT_KICK_BELLY_DEVICE=0 /home/yuting/robot_env/venv/bin/python /home/yuting/robot_env/competition.py --check"
+  },
+  "搬运标定": {
+    "输出文件": "/home/yuting/robot_env/config/carry_dual_reference.json",
+    "是否执行身体动作": false,
+    "头部动作": "会控制头部到129并打开双摄。",
+    "H键": "物块处于真实可抱起位置，腹部画面唯一目标稳定至少5帧后保存抱起参考。",
+    "D键": "机器人处于真实期望放下位置，头部画面唯一且内容匹配的目标二维码稳定至少5帧后保存放置参考。",
+    "Q键": "退出标定。",
+    "注意": "不要在仍抱着物块时把当前画面误存为抱起前参考。临时场地标定可用于功能测试，换物块、二维码尺寸或摄像头位置后需重新核对。不能伪造空标定文件绕过检查。"
+  },
+  "待解决与限制": [
+    "action1到真实搬运区域还有直线距离。目前若摄像头已看到物块可接近；若双摄均看不到，只做头部搜索，尚未加入有界前进搜索或明确额外步数。",
+    "双摄搬运参考文件当前缺失，是最近--check的主要阻塞项。",
+    "4次和7次小右转只是初始估计，不能认为必然45度或90度；不同颜色回程次数目前都为4。",
+    "蓝色区域近远画面比例和额外1步不能独立证明整机已入舞区。",
+    "足球确认球远离不等于射门成功。",
+    "DZZ正在执行时没有实时急停保证，退出串口也不是机械急停。",
+    "当前没有独立搬运阶段的专用比赛CLI；下一位接手者不要编造不存在的--carry-only参数。",
+    "用户出现过Qt字体、wayland插件和退出GLib警告，预览仍成功；没有为这些警告做额外修改。"
+  ],
+  "部署提醒": {
+    "最新镜像和音量更新文件": ["app/competition_identity.py", "app/robot_audio.py"],
+    "完整比赛流程文件": ["competition.py", "app/competition_main.py", "app/competition_route.py", "app/competition_qr.py", "app/competition_identity.py", "config/competition.json"],
+    "相关功能修改": ["hardware/robotmove.py", "hardware/roboteye.py", "app/carry_vision.py", "app/handover_debug.py", "app/robot_audio.py", "assets/actions/抱低处物块-减小前倾测试.dzz", "requirements.txt"],
+    "配置保护": "树莓派已有摄像头、串口和现场参数时只改指定项，不整份覆盖robot.env，不覆盖已有标定文件。",
+    "范围说明": "以上清单是当前实现依赖的文件，并不要求用户现在重新全部复制；应先核对树莓派实际版本。"
+  },
+  "建议继续顺序": [
+    "用户完成站立与抱起调试，确认本次连续HOLD_BOX表现。",
+    "恢复适合标定的站姿和物块位置，完成H/D双摄标定，再运行--check。",
+    "单独验证短距离抱物行走、寻找目标二维码和放下。",
+    "验证足球模式能在球远离后退出。",
+    "验证dance、蓝色地面确认、音乐和舞蹈。",
+    "补齐action1后的距离方案，再串联临时短路线。",
+    "正式场地校准距离、转弯、放置和入舞区条件。"
+  ]
+}

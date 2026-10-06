@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "gpio_bcm": 27,
+  "forward": 117,
+  "handover": 127,
+  "down_sign": 1,
+  "bounds": [
+    85,
+    137
+  ],
+  "cameras": {
+    "head": {
+      "backend": "usb",
+      "device": "/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0",
+      "flip": "0",
+      "fps": 15.0
+    },
+    "belly": {
+      "backend": "csi",
+      "device": "0",
+      "flip": "none",
+      "fps": 15.0
+    }
+  },
+  "shapes": {
+    "head": [
+      480,
+      640
+    ],
+    "belly": [
+      480,
+      640
+    ]
+  },
+  "overlap_confirmation": "operator_visual_confirmation; shape detection incomplete",
+  "units": "servo command units; physical degrees not calibrated"
+}

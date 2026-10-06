@@ -129,7 +129,8 @@ class Handover:
         return None
 
 
-def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
+def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False,
+        robot=None, deadline=None):
     if not 0 < fps <= 120 or not .08 <= settle <= 2.0:
         raise ValueError('fps must be >0..120; settle must be 0.08..2.0s')
     head_profile = json.loads((ROOT/'config/head_calibration.json').read_text(encoding='utf-8-sig'))
@@ -172,7 +173,9 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
                 or list(initial_belly.shape[:2]) != foot['shape']):
             raise ValueError('Cannot verify camera resolutions before startup head reset')
         if actions:
-            move = start_robot(); stack.callback(move.close)
+            move = robot
+            if move is None:
+                move = start_robot(); stack.callback(move.close)
             # 启动站姿后必须读取新画面，再做行走判断。
             body_ready_at = time.monotonic()+.5
         from Head import RobotHeadServoOnly
@@ -185,6 +188,8 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False):
         read_total = detect_total = 0.0
         timing = 'measuring processing FPS...'
         while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                print('比赛总期限到达，停止足球阶段');return False
             read_at = time.monotonic()
             okh,hf = head.getImage(); okb,bf = belly.getImage()
             read_total += time.monotonic()-read_at

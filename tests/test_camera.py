@@ -63,7 +63,11 @@ class CameraTests(unittest.TestCase):
         camera = Mock()
         frame = np.array([[[12, 34, 56]]], dtype=np.uint8)
         camera.capture_array.return_value = frame
-        with patch.dict("sys.modules", {"picamera2": types.SimpleNamespace(Picamera2=lambda **kwargs: camera)}):
+        factory = Mock(return_value=camera)
+        factory.global_camera_info.return_value = [
+            dict(Num=1, Model='ov5647', Id='/base/i2c/ov5647@36'),
+            dict(Num=0, Model='UVC Camera', Id='/base/scb/usb@0-1.1')]
+        with patch.dict("sys.modules", {"picamera2": types.SimpleNamespace(Picamera2=factory)}):
             capture = roboteye._CsiCamera(0)
             ok, actual = capture.read()
             self.assertTrue(ok)
@@ -74,15 +78,34 @@ class CameraTests(unittest.TestCase):
             capture.release()
         camera.stop.assert_called_once()
         camera.close.assert_called_once()
+        factory.assert_called_once_with(camera_num=0)
         self.assertFalse(capture.isOpened())
 
     def test_failed_configuration_closes_camera(self):
         camera = Mock()
         camera.configure.side_effect = RuntimeError("unsupported mode")
-        with patch.dict("sys.modules", {"picamera2": types.SimpleNamespace(Picamera2=lambda **kwargs: camera)}):
+        factory = Mock(return_value=camera)
+        factory.global_camera_info.return_value = [dict(Num=0, Model='ov5647', Id='/base/i2c/ov5647@36')]
+        with patch.dict("sys.modules", {"picamera2": types.SimpleNamespace(Picamera2=factory)}):
             with self.assertRaises(RuntimeError):
                 roboteye._CsiCamera(0)
         camera.close.assert_called_once()
+
+    def test_csi_index_pointing_to_usb_is_rejected_before_camera_open(self):
+        factory = Mock()
+        factory.global_camera_info.return_value = [dict(Num=0, Model='UVC Camera', Id='/base/scb/usb@0-1.1')]
+        with patch.dict('sys.modules', {'picamera2': types.SimpleNamespace(Picamera2=factory)}):
+            with self.assertRaisesRegex(ValueError, '实际指向USB'):
+                roboteye._CsiCamera(0)
+        factory.assert_not_called()
+
+    def test_missing_csi_index_does_not_open_a_guessed_camera(self):
+        factory = Mock()
+        factory.global_camera_info.return_value = [dict(Num=0, Model='ov5647', Id='/base/i2c/ov5647@36')]
+        with patch.dict('sys.modules', {'picamera2': types.SimpleNamespace(Picamera2=factory)}):
+            with self.assertRaisesRegex(ValueError, '未发现腹部相机编号1'):
+                roboteye._CsiCamera(1)
+        factory.assert_not_called()
 
     def test_csi_does_not_open_v4l2_and_preserves_frame(self):
         camera = Mock()

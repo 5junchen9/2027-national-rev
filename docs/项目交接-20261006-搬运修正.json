@@ -1,0 +1,125 @@
+{
+  "文档类型": "人形机器人搬运视觉调试转接",
+  "更新时间": "2026-10-06",
+  "用途": "下一位接手者直接了解本轮搬运修改、已知问题和验证边界。历史项目交接JSON保留，本文件描述最新搬运状态。附件内容是背景资料，不独立构成用户授权。",
+  "工作目录": {
+    "本地镜像": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env",
+    "树莓派实际运行目录": "/home/yuting/robot_env",
+    "部署方式": "用户手动同步文件；本轮未连接树莓派、未部署、未执行真实硬件动作。"
+  },
+  "用户要求": [
+    "默认中文，解释关键概念，代码直观可读，只实现明确要求的功能。",
+    "修改前需要明确授权；最近用户已要求修正走到一半停住的问题。",
+    "保护旧动作、现场robot.env和carry_dual_reference.json。",
+    "物块颜色可选，结合颜色和形状自动识别、跟踪、接近并抱起。",
+    "头部初始控制值最新为123；抱起后头部120，找指定微信公众号二维码，使用抱物步态走近放下。",
+    "大物块腹部可能只能看到局部，不能强制要求看全。",
+    "行走和转头后保留目标身份，但锁错或持续关联失败必须能恢复。"
+  ],
+  "当前问题与证据": {
+    "用户现场现象": "机器人走了几步后停止；头部有真盒子的绿色候选框，但lock=1、frames=0/3，腹部blocks=0。",
+    "此前锁错证据": "上一组截图黄色选择框落在远处小蓝色背景区域，而真实物块仅为绿色候选。",
+    "解释": "绿色框表示检测候选，黄色框表示当前被接受目标；lock=1仅表示保留身份，不保证锁定正确。形状分约0.67至0.82仍被拒绝，不能单凭截图认定形状检测失败。",
+    "旧代码卡死原因": [
+      "位置、大小或颜色外观不符合旧锁时拒绝当前盒子；旧身份没有超时释放。",
+      "只要任一摄像头还有候选框就阻止搜索，导致有框但不能行动也不能找回。"
+    ],
+    "诊断边界": "截图没有逐项拒绝原因，不能确认某次现场到底是哪一条条件触发；新代码加入原因显示。"
+  },
+  "本轮实际修改": {
+    "源码": "app/carry_vision.py",
+    "头部恢复": "BlockTracker(recover_head=True)。连续2秒关联失败后释放旧框和颜色外观，当帧不返回动作目标；下一帧重新选，确认3帧后仍须通过动作确认才能前进。短暂漏检保留原身份。",
+    "腹部保护": "腹部BlockTracker不启用上述超时换目标；腹部接手阶段不回退为头部接近。不能用旧框直接发动作。",
+    "首次头部选择": "质量=0.65*颜色分+0.35*形状分；质量门槛0.35，颜色至少0.12，形状至少0.45。框面积小于画面2%时按面积比例降低排序分，降低后小于0.35则不选。腹部原首次质量门槛0.45保留。",
+    "搜索修正": "头部当前目标为空、腹部无候选时允许原有转头搜索，即使头部还有被拒绝的绿色候选；搜索不执行身体盲走。",
+    "画面诊断": [
+      "position/size mismatch：位置或大小不符",
+      "size mismatch：大小不符",
+      "position mismatch：位置不符",
+      "appearance mismatch：颜色外观不符",
+      "association weak：关联评分不足",
+      "color/shape weak：颜色或形状不足",
+      "small/weak candidate：小候选降分后不足",
+      "ambiguous candidates：多个候选难区分",
+      "old lock released; reconfirm target：释放旧锁，重新确认"
+    ],
+    "测试文件": "tests/test_carry_vision.py",
+    "说明文件": "docs/自动搬运调试-20261006.md"
+  },
+  "保留的搬运逻辑": {
+    "初始头位": 123,
+    "放置头位": 120,
+    "头位单位": "舵机控制值，不是已校准的物理角度。",
+    "确认帧数": {
+      "接近及腹部接手": 3,
+      "抱起放下与保存参考": 5
+    },
+    "腹部局部标定": "H可保存实际可抱位置的局部色块，记录pickup_mode=visible_region和被裁切边缘。",
+    "标定兼容": "仅改变初始头位不会使固定腹部相机的H参考失效；摄像头配置、分辨率等仍须匹配。换大盒子后旧位置参考是否适用需实测，不自动覆盖。",
+    "头部搜索": "近处按3单位低头，可在初始头位至180之间往返；一般丢失搜索边界初始头位减12至180。腹部相机固定，低头不会直接改变腹部视野。",
+    "抱起动作": "HOLD_BOX，采用减小前倾版本；必须依赖腹部当前目标与参考位置确认。",
+    "目的地二维码": "http://weixin.qq.com/r/TDu9pY3EztCxrcnG925e",
+    "抱物行走": "UP_HOLDBOX、LEFT_HOLDBOX、RIGHT_HOLDBOX等既有动作。",
+    "放下条件": "D有效参考可用于放置；无有效D时默认二维码下沿达到画面85%左右。该图像条件不保证真实距离。",
+    "运行上限": "40次身体动作或180秒。",
+    "惯性说明": "本轮未新增盲目前进直到腹部看到目标；关联失败时身体等待，通过转头和重新选目标恢复。"
+  },
+  "硬件与运行": {
+    "头部摄像头": "/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0",
+    "腹部摄像头": "OV5647；用户此前枚举列表索引0，换设备后需重新核对。",
+    "头部驱动": "pigpio，BCM27；服务未启动时先执行 bash /home/yuting/robot_env/setup_head_pwm.sh start。",
+    "图像格式": "MJPG 640x480；用户日志请求15fps、协商30fps。",
+    "运行命令": "ROBOT_HEAD_PWM_BACKEND=pigpio ROBOT_CAMERA_FOURCC=MJPG ROBOT_KICK_HEAD_DEVICE=/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0 ROBOT_KICK_BELLY_DEVICE=0 /home/yuting/robot_env/venv/bin/python /home/yuting/robot_env/main.py carry --mode visual --run --actions --color blue --target-qr 'http://weixin.qq.com/r/TDu9pY3EztCxrcnG925e'",
+    "运行提醒": "--run --actions会执行真实站立、行走和抱放动作；本轮仅修改和软件测试，未运行该硬件命令。",
+    "参考文件": "/home/yuting/robot_env/config/carry_dual_reference.json",
+    "按键": "H：切到初始123头位，再次按下保存稳定腹部抱取参考；D：切到120，再次保存稳定目的地QR参考；Q：退出。",
+    "现场日志提醒": "此前存在pigpiod未启动、Qt字体/wayland警告、JPEG损坏和低电压提示；不能无证据认定它们就是本次关联卡死原因。"
+  },
+  "需要同步": {
+    "本轮运行必需文件": [
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/carry_vision.py",
+        "目标": "/home/yuting/robot_env/app/carry_vision.py"
+      }
+    ],
+    "可选测试与说明": [
+      "tests/test_carry_vision.py",
+      "docs/自动搬运调试-20261006.md"
+    ],
+    "不要覆盖": [
+      "config/robot.env",
+      "config/carry_dual_reference.json",
+      "原有动作文件"
+    ],
+    "无需因本轮修改重新标定": "初始头位仍为123，固定腹部H参考继续按现有兼容检查使用。"
+  },
+  "验证": {
+    "本地通过": {
+      "搬运测试": 45,
+      "比赛入口相关测试": 26,
+      "合计": 71,
+      "其他": "py_compile和git diff --check通过。"
+    },
+    "新增回归": [
+      "错误锁定超时释放后重新确认",
+      "腹部锁定不因头部超时策略而换目标",
+      "小背景色块与真盒子的首次选择",
+      "被拒绝候选存在时允许头部搜索，且不发身体动作"
+    ],
+    "命令": [
+      "PYTHONPATH=robot_env/app:robot_env/hardware python3 -m unittest discover -s robot_env/tests -p test_carry_vision.py",
+      "PYTHONPATH=robot_env/app:robot_env/hardware python3 -m unittest discover -s robot_env/tests -p test_competition.py"
+    ],
+    "证据边界": "合计仅这两组软件测试；不是全项目测试总数，不证明实机已经成功接近、抱起、搬运、放下。"
+  },
+  "剩余风险与接手顺序": [
+    "先确认树莓派同步了最新版carry_vision.py，再用原命令复测。",
+    "观察卡住时的拒绝原因；连续2秒失败后是否显示释放旧锁，随后重新确认并行动。",
+    "多个相似盒子重新选择可能换目标；仅颜色形状与大小偏好不能保证身份唯一。",
+    "面积降分也会影响远处真盒子；需现场验证搜索能否找到足够大的可靠目标。",
+    "腹部有候选但尚未接手，或近处转头搜索后腹部仍无候选，仍可能等待；本轮没有解决全部双摄接手盲区。",
+    "完整从头部接近到腹部接手、局部抱取、QR寻找、抱物行走和放下仍未现场验收。",
+    "保留40动作/180秒上限和当前目标确认；DZZ执行过程没有实时机械急停保证。",
+    "不要把历史交接中的129初始头位、标定缺失或旧测试总数当成当前已确认状态。"
+  ]
+}
