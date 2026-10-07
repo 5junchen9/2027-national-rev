@@ -294,7 +294,7 @@ class CompetitionTests(unittest.TestCase):
         frame[0, -1] = [40, 50, 60]
         eye.getImage.return_value = (True, frame)
         face = [(520, 350, 80, 80, .9)]
-        detector.detect.side_effect = [face, [], face, face, face] if missing_frame else [face] * 3
+        detector.detect.side_effect = [face, [], face, face] if missing_frame else [face] * 2
         gender.classify.return_value = ('female', .9)
         ocr.read_name.return_value = ('李晓明', .9)
         with patch.dict('sys.modules', {
@@ -310,6 +310,7 @@ class CompetitionTests(unittest.TestCase):
         configure.assert_called_once_with(volume=127)
         speech.assert_called_once_with('李晓明，女性')
         count = 2 if missing_frame else 1
+        self.assertEqual(detector.detect.call_count,4 if missing_frame else 2)
         self.assertEqual(gender.classify.call_count, count)
         self.assertEqual(ocr.read_name.call_count, count)
         self.assertEqual(ocr.read_name.call_args.args[1], (520, 350, 80, 80))
