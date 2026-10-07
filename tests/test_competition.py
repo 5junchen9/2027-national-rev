@@ -119,6 +119,12 @@ class CompetitionTests(unittest.TestCase):
             self.assertFalse(competition_main.main())
         robot_factory.assert_not_called()
 
+    def test_original_drop_cli_is_passed_to_preflight(self):
+        with patch.object(competition_main,'preflight',return_value=False) as check, \
+             patch('sys.argv',['competition.py','--run','--actions','--color','blue','--use-original-drop']):
+            self.assertFalse(competition_main.main())
+        self.assertTrue(check.call_args.kwargs['use_original_drop'])
+
     def test_fixed_moves_wait_for_fresh_observation_after_previous_action(self):
         for method, action in (('forward', 'UP_LITTLE'), ('right', 'TURN_RIGHT'), ('left', 'TURN_LEFT')):
             io = CompetitionIO(self.settings(), Mock(), float('inf'))
@@ -138,8 +144,15 @@ class CompetitionTests(unittest.TestCase):
             io.carry('blue', io.settings['drop_qr'])
         carry.assert_called_once_with('blue', io.settings['drop_qr'], actions=True,
                                       robot=robot, search_right_actions=5, deadline=999,
-                                      qr_reader=competition_main.read_codes)
+                                      qr_reader=competition_main.read_codes, use_original_drop=False)
         io.close_views.assert_called_once();io.open_views.assert_called_once()
+
+    def test_original_drop_option_reaches_carry(self):
+        io = CompetitionIO(self.settings(), Mock(), 999, use_original_drop=True)
+        io.close_views = Mock();io.open_views = Mock()
+        with patch('carry_vision.run', return_value=True) as carry:
+            io.carry('blue', io.settings['drop_qr'])
+        self.assertTrue(carry.call_args.kwargs['use_original_drop'])
 
     def test_failure_in_each_task_never_starts_later_tasks(self):
         tasks = ['identity', 'carry', 'sport', 'enter_blue', 'dance']

@@ -57,7 +57,7 @@ def legacy_root(settings):
     return (ROOT / settings["legacy_root"]).resolve()
 
 
-def preflight(settings):
+def preflight(settings, use_original_drop=False):
     """仅查文件与标定，不启动摄像头、GPIO、串口或模型进程。"""
     from robotmove import ACTIONS
     from dreammaker_protocol import load_dzz, motion_frame, apply_offsets, DEFAULT_INITIAL_POSITIONS
@@ -106,8 +106,10 @@ def preflight(settings):
                 or "pickup" not in reference):
             problems.append("双摄搬运标定缺失或视图/目的地不匹配，请先恢复原相机配置并核对H标定")
         from carry_vision import drop_reference
-        if drop_reference(reference) is None:
+        if drop_reference(reference) is None and not use_original_drop:
             problems.append("缺少有效120头位D投放参考；保留H，在实际放置位置保存D")
+        elif drop_reference(reference) is None:
+            print("[调试] 沿用H；缺D时按旧版二维码下沿57%放下，尚未验证实际投放位置。")
     except (OSError, ValueError) as error:
         problems.append("搬运标定：" + str(error))
     try:
@@ -148,10 +150,11 @@ class GuardedRobot:
 
 
 class CompetitionIO:
-    def __init__(self, settings, robot, deadline):
+    def __init__(self, settings, robot, deadline, use_original_drop=False):
         self.settings = settings
         self.robot = robot
         self.deadline = deadline
+        self.use_original_drop = use_original_drop
         self.views = None
         self.stream = None
         self.phase_name = "启动"
@@ -303,7 +306,7 @@ class CompetitionIO:
         from carry_vision import run
         if not run(color, target, actions=True, robot=self.robot,
                    search_right_actions=self.settings["delivery_search_right_actions"], deadline=self.deadline,
-                   qr_reader=read_codes):
+                   qr_reader=read_codes, use_original_drop=self.use_original_drop):
             raise RuntimeError("搬运未完成，停止比赛")
         self.open_views()
 
@@ -422,6 +425,8 @@ def main():
     parser.add_argument("--calibrate-carry", action="store_true", help="双摄搬运H/D标定，不打开身体串口")
     parser.add_argument("--run", action="store_true")
     parser.add_argument("--actions", action="store_true")
+    parser.add_argument("--use-original-drop", action="store_true",
+                        help="调试：缺D时沿用旧版二维码下沿规则放下，保留H标定")
     args = parser.parse_args()
     if sum((args.check, args.simulate, args.preview, args.calibrate_carry)) > 1:
         parser.error("check、simulate、preview、calibrate-carry只能选一种")
@@ -429,7 +434,7 @@ def main():
         parser.error("真实身体动作只用 --run --actions")
     settings = load_settings(args.config)
     if args.check or not (args.simulate or args.preview or args.calibrate_carry or args.run):
-        return preflight(settings)
+        return preflight(settings, use_original_drop=args.use_original_drop)
     color = args.color or ("blue" if args.simulate else input("现场指定颜色 red/blue/yellow：").strip().lower())
     if color not in ("red", "blue", "yellow"):
         parser.error("请选择red、blue、yellow")
@@ -447,13 +452,13 @@ def main():
         return preview(settings, color)
     if not args.actions:
         parser.error("整场动作需要 --run --actions；无身体动作请使用 --run --preview")
-    if not preflight(settings):
+    if not preflight(settings, use_original_drop=args.use_original_drop):
         return False
     from robotmove import RobotMove
     from robot_audio import configure
     configure()
     deadline = time.monotonic() + settings["total_seconds"]
-    io = CompetitionIO(settings, None, deadline)
+    io = CompetitionIO(settings, None, deadline, use_original_drop=args.use_original_drop)
     try:
         io.open_views()
         head, belly, _ = io.observe()

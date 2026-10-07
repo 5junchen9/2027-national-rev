@@ -521,9 +521,10 @@ def drop_reference(reference):
 
 
 class CarryPlanner:
-    def __init__(self, reference, flip):
+    def __init__(self, reference, flip, use_original_drop=False):
         self.reference = reference
         self.flip = flip
+        self.use_original_drop = use_original_drop
         self.phase = 'PICKUP'
         self.actions = 0
         self.started_at = time.monotonic()
@@ -557,44 +558,70 @@ class CarryPlanner:
                 return 'STOP'
         else:
             target = drop_reference(self.reference)
-            if target is None:
+            if target is None and self.use_original_drop:
+                # 旧版只有画面下沿阈值，不能据此推算真实投放距离。
+                dx = box.cx-.5
+                tolerance = .16 if self.delivery_aligned else .12
+                if abs(dx) > tolerance:
+                    self.delivery_aligned = False
+                    action = steering('LEFT_HOLDBOX' if dx < 0 else 'RIGHT_HOLDBOX',self.flip)
+                elif box.bottom < .60-.03:
+                    self.delivery_aligned = True
+                    action = 'UP_HOLDBOX'
+                elif not decoded:
+                    self.reset_confirmation()
+                    self.reason = 'original drop line reached; need fresh exact QR decode'
+                    return 'WAIT'
+                else:
+                    self.delivery_aligned = True
+                    action = 'DOWN_BOX'
+                self.reason = f'original drop rule: QR bottom={box.bottom:.0%}; '+action
+            elif target is None:
                 self.reason = 'STOP: valid D placement reference at head120 required'
                 return 'STOP'
-            width_ratio = box.width/target.width
-            height_ratio = box.height/target.height
-            dx = box.cx-target.cx
-            tolerance = .16 if self.delivery_aligned else .12
-            near = min(width_ratio,height_ratio)+1e-6 >= DROP_SIZE_MIN
-            if max(width_ratio,height_ratio) > DROP_SIZE_MAX:
-                self.reason = 'STOP: QR larger than placement reference; too close or view changed'
-                return 'STOP'
-            if not .80 <= width_ratio/height_ratio <= 1.25:
-                self.reset_confirmation()
-                self.reason = 'QR shape differs from placement reference; hold body'
-                return 'WAIT'
-            if near:
-                tolerance = DROP_POSITION_TOLERANCE
-            if abs(dx) > tolerance:
-                self.delivery_aligned = False
-                action = 'LEFT_HOLDBOX' if dx < 0 else 'RIGHT_HOLDBOX'
-                action = steering(action,self.flip)
-                self.reason = 'turn toward target QR'
-            elif not near:
-                self.delivery_aligned = True
-                action = 'UP_HOLDBOX'
-                self.reason = f'approach placement size: W={width_ratio:.0%} H={height_ratio:.0%}'
-            elif abs(box.cy-target.cy) > DROP_POSITION_TOLERANCE:
-                self.reset_confirmation()
-                self.reason = 'placement size reached but vertical position differs; hold body'
-                return 'WAIT'
-            elif not decoded:
-                self.reset_confirmation()
-                self.reason = 'placement near; need fresh exact QR decode before release'
-                return 'WAIT'
             else:
-                self.delivery_aligned = True
-                action = 'DOWN_BOX'
-                self.reason = f'placement reference reached: W={width_ratio:.0%} H={height_ratio:.0%}; release'
+                return self.decide_placement(box,stable_frames,target,decoded)
+        return self.confirm_action(action,stable_frames)
+
+    def decide_placement(self, box, stable_frames, target, decoded):
+        width_ratio = box.width/target.width
+        height_ratio = box.height/target.height
+        dx = box.cx-target.cx
+        tolerance = .16 if self.delivery_aligned else .12
+        near = min(width_ratio,height_ratio)+1e-6 >= DROP_SIZE_MIN
+        if max(width_ratio,height_ratio) > DROP_SIZE_MAX:
+            self.reason = 'STOP: QR larger than placement reference; too close or view changed'
+            return 'STOP'
+        if not .80 <= width_ratio/height_ratio <= 1.25:
+            self.reset_confirmation()
+            self.reason = 'QR shape differs from placement reference; hold body'
+            return 'WAIT'
+        if near:
+            tolerance = DROP_POSITION_TOLERANCE
+        if abs(dx) > tolerance:
+            self.delivery_aligned = False
+            action = 'LEFT_HOLDBOX' if dx < 0 else 'RIGHT_HOLDBOX'
+            action = steering(action,self.flip)
+            self.reason = 'turn toward target QR'
+        elif not near:
+            self.delivery_aligned = True
+            action = 'UP_HOLDBOX'
+            self.reason = f'approach placement size: W={width_ratio:.0%} H={height_ratio:.0%}'
+        elif abs(box.cy-target.cy) > DROP_POSITION_TOLERANCE:
+            self.reset_confirmation()
+            self.reason = 'placement size reached but vertical position differs; hold body'
+            return 'WAIT'
+        elif not decoded:
+            self.reset_confirmation()
+            self.reason = 'placement near; need fresh exact QR decode before release'
+            return 'WAIT'
+        else:
+            self.delivery_aligned = True
+            action = 'DOWN_BOX'
+            self.reason = f'placement reference reached: W={width_ratio:.0%} H={height_ratio:.0%}; release'
+        return self.confirm_action(action,stable_frames)
+
+    def confirm_action(self, action, stable_frames):
         self.confirm_frames = self.confirm_frames+1 if self.pending == action else 1
         self.pending = action
         required = DROP_FRAMES if action == 'DOWN_BOX' else PICKUP_FRAMES if action == 'HOLD_BOX' else TRACK_FRAMES
@@ -624,7 +651,7 @@ class CarryPlanner:
 
 
 def run(color, target_qr, actions=False, robot=None, search_right_actions=5, deadline=None,
-        qr_reader=None):
+        qr_reader=None, use_original_drop=False):
     settings = camera_settings()
     reference = json.loads(REFERENCE_FILE.read_text()) if REFERENCE_FILE.exists() else None
     if actions:
@@ -633,9 +660,9 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                 or reference.get('target_qr') != target_qr
                 or 'pickup' not in reference):
             raise ValueError('双摄配置或H参考不匹配，请先恢复原相机配置并核对H；实际投放还需120头位D参考')
-        if drop_reference(reference) is None:
+        if drop_reference(reference) is None and not use_original_drop:
             raise ValueError('实际投放需要120头位的D参考：在物块实际应放下的位置保存D；保留已有H标定')
-    planner = CarryPlanner(reference,settings['belly']['flip']) if actions else None
+    planner = CarryPlanner(reference,settings['belly']['flip'],use_original_drop) if actions else None
     handover = Handover(dict(forward=INITIAL_HEAD_POSITION,down_sign=1,
                              bounds=[HEAD_SEARCH_MIN,HEAD_SEARCH_MAX]))
     handover.down = HEAD_SEARCH_MAX  # 只覆盖搬运范围，不改变球类任务的共享默认值。
@@ -681,7 +708,10 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
         print('交接须目标居中、下沿到88%、宽度至少30%、框面积至少10%。')
         print('看得见目标时正常靠近；近处丢失后先低头找回，到低头边界仍丢失才最多惯性前进3次UP_LITTLE，腹部未接手则停止。')
         print('实际投放用D位置与宽高参考：宽高达到参考90%至120%、中心接近，且目标二维码连续解码3帧才放下；超过120%停止。')
-        print('在实机确认适合放下的位置保存D，头位120；已有正确D可沿用。缺D不启用身体搬运，不再使用默认下沿横线。')
+        if use_original_drop and drop_reference(reference) is None:
+            print('调试沿用H：缺D时使用旧版下沿60%参考，提前3%触发、目标二维码解码确认3帧；实际投放位置尚未验证。')
+        else:
+            print('在实机确认适合放下的位置保存D，头位120；已有正确D可沿用。缺D不启用身体搬运。')
         while True:
             if deadline is not None and time.monotonic() >= deadline:
                 print('比赛总期限到达，停止搬运');return False

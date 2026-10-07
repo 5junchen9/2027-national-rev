@@ -14,6 +14,33 @@ from dual_kick import camera_settings
 
 
 class CarryVisionTests(unittest.TestCase):
+    def test_original_h_trial_approaches_and_requires_exact_decode_to_release(self):
+        reference = dict(pickup=[.4,.5,.1,.1])
+        planner = CarryPlanner(reference,'none',use_original_drop=True)
+        planner.phase = 'DELIVER'
+        self.assertEqual(self.confirmed_action(planner,Box(.45,.3,.1,.1)),'UP_HOLDBOX')
+        self.assertEqual(self.confirmed_action(planner,Box(.1,.5,.1,.1)),'LEFT_HOLDBOX')
+        box = Box(.45,.5,.1,.1)
+        self.assertEqual(planner.decide(box,3,decoded=False),'WAIT')
+        self.assertEqual([planner.decide(box,3) for _ in range(3)],['WAIT','WAIT','DOWN_BOX'])
+        self.assertEqual(reference,dict(pickup=[.4,.5,.1,.1]))
+
+    def test_original_drop_option_still_prefers_valid_d(self):
+        planner = CarryPlanner(self.reference(),'none',use_original_drop=True)
+        planner.phase = 'DELIVER'
+        self.assertEqual(self.confirmed_action(planner,Box(.48,.46,.04,.04)),'UP_HOLDBOX')
+
+    def test_original_h_trial_passes_reference_gate_without_modifying_file(self):
+        reference = dict(version=3,cameras=camera_settings(),target_qr='DROP',
+                         shapes=dict(head=[480,640],belly=[480,640]),pickup=[.4,.5,.1,.1])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'carry.json';path.write_text(json.dumps(reference))
+            with patch.object(carry_vision,'REFERENCE_FILE',path), \
+                 patch.object(carry_vision,'RobotEye',side_effect=RuntimeError('camera reached')):
+                with self.assertRaisesRegex(RuntimeError,'camera reached'):
+                    carry_vision.run('blue','DROP',actions=True,robot=Mock(),use_original_drop=True)
+            self.assertEqual(json.loads(path.read_text()),reference)
+
     def test_small_qr_at_old_release_line_never_releases(self):
         planner = CarryPlanner(self.reference(),'none');planner.phase = 'DELIVER'
         # 与参考相同下沿，但二维码宽高仅20%，原下沿方案会直接放下。
