@@ -79,7 +79,7 @@ def recognize(root, position, timeout, eye=None, head=None):
 
     # 只借用同学的裁剪、性别名称和播报；不调用其旧头部驱动或五人模型。
     source = load_source(root, "app/face_main.py", "colleague_face")
-    confirm_frames = 2  # 姓名和性别连续两个新检测结果一致后播报。
+    confirm_frames = 1  # 首次得到有效姓名和性别后播报。
     state = dict(frame_index=0, name=None, name_score=None,
                  gender_label=None, gender_score=0.0)
     print(f'[人脸配置] 头位={position}；性别每{source.GENDER_INTERVAL}个有效人脸帧、OCR每{source.OCR_INTERVAL}帧更新；中间复用结果。')

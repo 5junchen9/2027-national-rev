@@ -294,7 +294,7 @@ class CompetitionTests(unittest.TestCase):
         frame[0, -1] = [40, 50, 60]
         eye.getImage.return_value = (True, frame)
         face = [(520, 350, 80, 80, .9)]
-        detector.detect.side_effect = [face, [], face, face] if missing_frame else [face] * 2
+        detector.detect.side_effect = [[],face] if missing_frame else [face]
         gender.classify.return_value = ('female', .9)
         ocr.read_name.return_value = ('李晓明', .9)
         with patch.dict('sys.modules', {
@@ -309,10 +309,9 @@ class CompetitionTests(unittest.TestCase):
         head.turn_vertical.assert_called_once_with(124)
         configure.assert_called_once_with(volume=127)
         speech.assert_called_once_with('李晓明，女性')
-        count = 2 if missing_frame else 1
-        self.assertEqual(detector.detect.call_count,4 if missing_frame else 2)
-        self.assertEqual(gender.classify.call_count, count)
-        self.assertEqual(ocr.read_name.call_count, count)
+        self.assertEqual(detector.detect.call_count,2 if missing_frame else 1)
+        self.assertEqual(gender.classify.call_count,1)
+        self.assertEqual(ocr.read_name.call_count,1)
         self.assertEqual(ocr.read_name.call_args.args[1], (520, 350, 80, 80))
         np.testing.assert_array_equal(detector.detect.call_args.args[0][0, 0], [40, 50, 60])
         np.testing.assert_array_equal(ocr.read_name.call_args.args[0][0, 0], [40, 50, 60])
@@ -365,7 +364,7 @@ class CompetitionTests(unittest.TestCase):
         reader.close.assert_called_once();io.resume_route.assert_not_called()
         io.head_eye.close.assert_not_called();io.belly_eye.close.assert_not_called()
 
-    def test_lost_face_resets_actual_ocr_confirmation(self):
+    def test_missing_face_waits_for_first_valid_name_and_gender(self):
         self.check_colleague_identity(missing_frame=True)
 
     def test_slow_identity_keeps_preview_live_without_cached_confirmations(self):
