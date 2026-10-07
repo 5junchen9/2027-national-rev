@@ -651,7 +651,7 @@ class CarryPlanner:
 
 
 def run(color, target_qr, actions=False, robot=None, search_right_actions=5, deadline=None,
-        qr_reader=None, use_original_drop=False):
+        qr_reader=None, use_original_drop=False, eyes=None, servo=None):
     settings = camera_settings()
     reference = json.loads(REFERENCE_FILE.read_text()) if REFERENCE_FILE.exists() else None
     if actions:
@@ -676,8 +676,11 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
     head_search_direction = 1
     last_qr_x = None
     with ExitStack() as stack:
-        head_eye = RobotEye(**settings['head'],latest=True);stack.callback(head_eye.close)
-        belly_eye = RobotEye(**settings['belly'],latest=True);stack.callback(belly_eye.close)
+        if eyes is None:
+            head_eye = RobotEye(**settings['head'],latest=True);stack.callback(head_eye.close)
+            belly_eye = RobotEye(**settings['belly'],latest=True);stack.callback(belly_eye.close)
+        else:
+            head_eye, belly_eye = eyes
         okh,hf = head_eye.getImage();okb,bf = belly_eye.getImage()
         if not okh or not okb: raise RuntimeError('Camera read failed before startup')
         shapes = dict(head=list(hf.shape[:2]),belly=list(bf.shape[:2]))
@@ -689,7 +692,8 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                 from robotmove import RobotMove
                 move = RobotMove(None,port=BODY_SERIAL_PORT);stack.callback(move.close)
         from Head import RobotHeadServoOnly
-        servo = RobotHeadServoOnly(hold=True);stack.callback(servo.cleanup)
+        if servo is None:
+            servo = RobotHeadServoOnly(hold=True);stack.callback(servo.cleanup)
         servo.turn_vertical(INITIAL_HEAD_POSITION)
         head_eye.discard_frames(1);belly_eye.discard_frames(1)
         stack.callback(cv2.destroyAllWindows)

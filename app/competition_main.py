@@ -3,10 +3,8 @@ import argparse
 import importlib.util
 from contextlib import ExitStack
 import json
-import os
 from pathlib import Path
 import subprocess
-import sys
 import time
 
 import cv2
@@ -122,7 +120,7 @@ def preflight(settings, use_original_drop=False):
         problems.append("足球标定：" + str(error))
     for problem in problems:
         print("[未就绪]", problem)
-    print("[说明] 4次/7次右转和回程次数必须现场测量；blue比例不能证明整机已进入舞区。")
+    print("[说明] 各段右转和回程次数必须现场测量；blue比例不能证明整机已进入舞区。")
     print("[说明] 足球沿用行走带球，连续确认球远离后退出；不证明进球。")
     return not problems
 
@@ -184,11 +182,8 @@ class CompetitionIO:
             self.views.callback(self.servo.cleanup)
             self.views.callback(cv2.destroyAllWindows)
             self.servo.turn_vertical(head_position)
-            self.stream = RouteVision(self.head_eye, self.belly_eye,
-                                      read_codes,
-                                      self.settings["qr_confirm_frames"])
-            self.views.callback(self.stream.close)
-            self.flush()
+            self.views.callback(self.stop_route)
+            self.start_route()
             self.view_shapes = None
         except BaseException:
             self.close_views()
@@ -199,6 +194,23 @@ class CompetitionIO:
             views, self.views = self.views, None
             views.close()
             self.stream = None
+
+    def stop_route(self):
+        """先停止路线读图线程，再将相机交给下一阶段；保持相机打开。"""
+        if self.stream is not None:
+            self.stream.close()
+            self.stream = None
+
+    def start_route(self):
+        self.stream = RouteVision(self.head_eye, self.belly_eye, read_codes,
+                                  self.settings["qr_confirm_frames"])
+        self.flush()
+
+    def resume_route(self):
+        self.servo.turn_vertical(129)
+        self.head_eye.discard_frames(1)
+        self.belly_eye.discard_frames(1)
+        self.start_route()
 
     def set_head(self, position):
         self.open_views()
@@ -264,6 +276,7 @@ class CompetitionIO:
                                 self.settings["route_max_steps"],
                                 min(self.deadline, time.monotonic() + self.settings["route_timeout_seconds"]))
         print("寻找完整二维码：", content, "相机：", camera, flush=True)
+        candidate_paused = False
         if self.stream is not None:
             self.stream.watch(content, camera)
         try:
@@ -274,6 +287,13 @@ class CompetitionIO:
                 if (time.monotonic() < planner.deadline and ready and self.stream is not None
                         and self.stream.saw_target()):
                     action = "DONE"
+                elif (action in ("UP_LITTLE", "STOP") and time.monotonic() < planner.deadline
+                      and self.stream is not None and self.stream.saw_candidate()):
+                    # 行走期间首次读到目标后，原地等待完整确认，不继续跨过路标。
+                    action = "WAIT"
+                    if not candidate_paused:
+                        print("已读到目标二维码，暂停前进并等待连续确认：", content, flush=True)
+                        candidate_paused = True
                 if action == "DONE":
                     print("二维码连续确认：", content, flush=True)
                     return
@@ -287,36 +307,32 @@ class CompetitionIO:
                 self.stream.watch(None, None)
 
     def identity(self):
-        self.close_views()  # 人脸阶段独占头部USB和GPIO，不抢摄像头。
-        command = [sys.executable, str(ROOT / "app/competition_identity.py"),
-                   "--legacy-root", str(legacy_root(self.settings)),
-                   "--head-position", str(self.settings["face_head_position"]),
-                   "--timeout", str(min(60, self.deadline - time.monotonic()))]
-        env = dict(os.environ)
-        view = camera_settings()["head"]
-        env.update(ROBOT_CAMERA_DEVICE=view["device"], ROBOT_CAMERA_BACKEND="usb",
-                   ROBOT_CAMERA_FLIP=view["flip"], ROBOT_CAMERA_FPS=str(view["fps"]),
-                   ROBOT_HEAD_LEVEL=str(self.settings["face_head_position"]))
-        subprocess.run(command, env=env, check=True,
-                       timeout=max(0.1, self.deadline - time.monotonic()))
-        self.open_views()
+        self.stop_route()
+        from competition_identity import recognize
+        if not recognize(legacy_root(self.settings), self.settings["face_head_position"],
+                         min(60, self.deadline-time.monotonic()),
+                         eye=self.head_eye, head=self.servo):
+            raise RuntimeError("姓名和性别识别未完成，停止比赛")
+        self.check_time()
+        self.resume_route()
 
     def carry(self, color, target):
-        self.close_views()
+        self.stop_route()
         from carry_vision import run
         if not run(color, target, actions=True, robot=self.robot,
                    search_right_actions=self.settings["delivery_search_right_actions"], deadline=self.deadline,
-                   qr_reader=read_codes, use_original_drop=self.use_original_drop):
+                   qr_reader=read_codes, use_original_drop=self.use_original_drop,
+                   eyes=(self.head_eye, self.belly_eye), servo=self.servo):
             raise RuntimeError("搬运未完成，停止比赛")
-        self.open_views()
+        self.resume_route()
 
     def sport(self):
-        self.close_views()
+        self.stop_route()
         from handover_debug import run
         if not run(fps=camera_settings()["head"]["fps"], actions=True, robot=self.robot,
-                   deadline=self.deadline):
+                   deadline=self.deadline, eyes=(self.head_eye, self.belly_eye), servo=self.servo):
             raise RuntimeError("足球阶段未完成，停止比赛")
-        self.open_views()
+        self.resume_route()
 
     def enter_blue(self):
         entry = BlueEntry(self.settings["blue_min_ratio"], self.settings["blue_confirm_frames"])

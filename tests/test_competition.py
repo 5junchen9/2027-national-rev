@@ -83,7 +83,7 @@ class CompetitionTests(unittest.TestCase):
         frame = np.zeros((100, 100, 3), np.uint8)
         head, belly = Mock(), Mock()
         head.getImage.return_value = (True, frame)
-        decode = Mock(side_effect=[[], [('face', None)]] * 3 + [[], []])
+        decode = Mock(side_effect=[[('face', None)]] * 3 + [[]])
         with patch('competition_route.threading.Thread'):
             stream = RouteVision(head, belly, decode, 3)
         reads = 0
@@ -96,9 +96,46 @@ class CompetitionTests(unittest.TestCase):
         stream.watch('face', 'belly')
         stream.capture()
         self.assertTrue(stream.saw_target())
+        self.assertTrue(stream.saw_candidate())
+        self.assertEqual(decode.call_count,4)  # 仅腹部解码，不再每轮双摄各解码一次。
         self.assertEqual(stream.latest[2]['belly'], [])
         stream.watch('sber', 'belly')
         self.assertFalse(stream.saw_target())
+        self.assertFalse(stream.saw_candidate())
+
+    def test_first_route_decode_holds_next_step_even_if_current_frame_misses(self):
+        settings = self.settings();settings['route_max_steps'] = 0
+        io = CompetitionIO(settings,Mock(),float('inf'))
+        io.open_views = Mock();io.ready_at = 0
+        io.stream = Mock()
+        io.stream.saw_target.side_effect = [False,True]
+        io.stream.saw_candidate.return_value = True
+        io.observe = Mock(return_value=(None,None,{'belly':[]}))
+        io.move = Mock()
+        io.scan_until('sber','belly')
+        io.move.assert_not_called()
+        self.assertEqual(io.observe.call_count,2)
+
+    def test_background_latches_one_decode_without_marking_route_confirmed(self):
+        frame=np.zeros((100,100,3),np.uint8)
+        head,belly=Mock(),Mock()
+        head.getImage.return_value=(True,frame)
+        decode=Mock(side_effect=[[('sber',None)],[]])
+        with patch('competition_route.threading.Thread'):
+            stream=RouteVision(head,belly,decode,3)
+        reads=0
+        def read_belly():
+            nonlocal reads
+            reads+=1
+            if reads==2: stream.stopped.set()
+            return True,frame
+        belly.getImage.side_effect=read_belly
+        stream.watch('sber','belly');stream.capture()
+        self.assertTrue(stream.saw_candidate())
+        self.assertFalse(stream.saw_target())
+        self.assertEqual(stream.frames,0)
+        stream.watch('action1','belly')
+        self.assertFalse(stream.saw_candidate())
 
     def test_code_seen_during_last_allowed_step_still_completes_stage(self):
         settings = self.settings();settings['route_max_steps'] = 0
@@ -139,17 +176,20 @@ class CompetitionTests(unittest.TestCase):
     def test_carry_receives_shared_body_connection(self):
         robot = Mock()
         io = CompetitionIO(self.settings(), robot, 999)
-        io.close_views = Mock();io.open_views = Mock()
+        io.stop_route = Mock();io.resume_route = Mock()
+        io.head_eye,io.belly_eye,io.servo = Mock(),Mock(),Mock()
         with patch('carry_vision.run', return_value=True) as carry:
             io.carry('blue', io.settings['drop_qr'])
         carry.assert_called_once_with('blue', io.settings['drop_qr'], actions=True,
                                       robot=robot, search_right_actions=5, deadline=999,
-                                      qr_reader=competition_main.read_codes, use_original_drop=False)
-        io.close_views.assert_called_once();io.open_views.assert_called_once()
+                                      qr_reader=competition_main.read_codes, use_original_drop=False,
+                                      eyes=(io.head_eye,io.belly_eye),servo=io.servo)
+        io.stop_route.assert_called_once();io.resume_route.assert_called_once()
 
     def test_original_drop_option_reaches_carry(self):
         io = CompetitionIO(self.settings(), Mock(), 999, use_original_drop=True)
-        io.close_views = Mock();io.open_views = Mock()
+        io.stop_route = Mock();io.resume_route = Mock()
+        io.head_eye,io.belly_eye,io.servo = Mock(),Mock(),Mock()
         with patch('carry_vision.run', return_value=True) as carry:
             io.carry('blue', io.settings['drop_qr'])
         self.assertTrue(carry.call_args.kwargs['use_original_drop'])
@@ -171,7 +211,7 @@ class CompetitionTests(unittest.TestCase):
             self.assertEqual([call.args for call in io.scan_until.call_args_list],
                              [('face', 'belly'), ('sber', 'belly'),
                               ('action1', 'belly'), ('dance', 'head')])
-            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 4, 4, count, 7])
+            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 3, 4, count, 7])
             io.left.assert_called_once_with(1)
             self.assertEqual([call.args[0] for call in io.forward.call_args_list], [1, 3, 1])
             calls = [call[0] for call in io.method_calls]
@@ -245,7 +285,7 @@ class CompetitionTests(unittest.TestCase):
             self.assertTrue(voice_main._run_face(None))
         recognize.assert_called_once_with(competition_main.legacy_root(self.settings()),124,60)
 
-    def check_colleague_identity(self, missing_frame=False):
+    def check_colleague_identity(self, missing_frame=False, shared=False):
         root = competition_main.legacy_root(self.settings())
         eye, head, detector, gender, ocr = Mock(), Mock(), Mock(), Mock(), Mock()
         speech = Mock(return_value=True)
@@ -265,7 +305,7 @@ class CompetitionTests(unittest.TestCase):
              patch('robot_audio.configure') as configure, \
              patch.object(cv2, 'imshow'), patch.object(cv2, 'destroyAllWindows'), \
              patch.object(cv2, 'waitKey', return_value=-1):
-            self.assertTrue(recognize(root, 124, 5))
+            self.assertTrue(recognize(root, 124, 5, eye=eye, head=head) if shared else recognize(root, 124, 5))
         head.turn_vertical.assert_called_once_with(124)
         configure.assert_called_once_with(volume=127)
         speech.assert_called_once_with('李晓明，女性')
@@ -276,12 +316,53 @@ class CompetitionTests(unittest.TestCase):
         np.testing.assert_array_equal(detector.detect.call_args.args[0][0, 0], [40, 50, 60])
         np.testing.assert_array_equal(ocr.read_name.call_args.args[0][0, 0], [40, 50, 60])
         np.testing.assert_array_equal(frame[0, 0], [10, 20, 30])
-        eye.close.assert_called_once();head.cleanup.assert_called_once()
+        if shared:
+            eye.close.assert_not_called();head.cleanup.assert_not_called()
+        else:
+            eye.close.assert_called_once();head.cleanup.assert_called_once()
         for model in (detector, gender, ocr):
             model.close.assert_called_once()
 
     def test_colleague_ocr_name_is_announced_without_old_name_model(self):
         self.check_colleague_identity()
+
+    def test_identity_does_not_close_borrowed_camera_and_head(self):
+        self.check_colleague_identity(shared=True)
+
+    def test_full_phase_handoffs_open_cameras_once_and_close_once_at_end(self):
+        io = CompetitionIO(self.settings(),Mock(),float('inf'))
+        head,belly,servo = Mock(),Mock(),Mock()
+        readers = [Mock(),Mock(),Mock(),Mock()]
+        with patch('roboteye.RobotEye',side_effect=[head,belly]) as factory, \
+             patch.dict('sys.modules',{'Head':types.SimpleNamespace(RobotHeadServoOnly=Mock(return_value=servo))}), \
+             patch('competition_main.RouteVision',side_effect=readers), \
+             patch('competition_identity.recognize',return_value=True) as face, \
+             patch('carry_vision.run',return_value=True) as carry, \
+             patch('handover_debug.run',return_value=True) as sport, \
+             patch.object(cv2,'destroyAllWindows'):
+            io.open_views()
+            for method in (io.identity,lambda:io.carry('blue',io.settings['drop_qr']),io.sport):
+                method()
+                head.close.assert_not_called();belly.close.assert_not_called();servo.cleanup.assert_not_called()
+            face.assert_called_once_with(competition_main.legacy_root(io.settings),124,60,eye=head,head=servo)
+            for stage in (carry,sport):
+                self.assertEqual(stage.call_args.kwargs['eyes'],(head,belly))
+                self.assertIs(stage.call_args.kwargs['servo'],servo)
+            self.assertEqual(factory.call_count,2)
+            io.close_views()
+        head.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
+        for reader in readers: reader.close.assert_called_once()
+
+    def test_failed_stage_does_not_resume_route_or_close_borrowed_resources(self):
+        io = CompetitionIO(self.settings(),Mock(),float('inf'))
+        io.head_eye,io.belly_eye,io.servo = Mock(),Mock(),Mock()
+        io.stream = Mock();reader=io.stream
+        io.resume_route = Mock()
+        with patch('carry_vision.run',return_value=False):
+            with self.assertRaisesRegex(RuntimeError,'搬运未完成'):
+                io.carry('blue',io.settings['drop_qr'])
+        reader.close.assert_called_once();io.resume_route.assert_not_called()
+        io.head_eye.close.assert_not_called();io.belly_eye.close.assert_not_called()
 
     def test_lost_face_resets_actual_ocr_confirmation(self):
         self.check_colleague_identity(missing_frame=True)
@@ -407,7 +488,7 @@ class CompetitionTests(unittest.TestCase):
             self.assertEqual(read_codes(np.zeros((100,100,3),np.uint8)),[])
         self.assertEqual(decoder.call_count,3)
 
-    def test_shared_carry_search_turns_once_without_new_connection(self):
+    def check_shared_carry(self, shared=False):
         import carry_vision
         from dual_kick import camera_settings
         from kick_shapes import Box
@@ -429,7 +510,7 @@ class CompetitionTests(unittest.TestCase):
             path = Path(folder) / 'carry.json';path.write_text(json.dumps(reference))
             with patch.object(carry_vision, 'REFERENCE_FILE', path), \
                  patch.object(carry_vision, 'block_quality', return_value=(1.0,1.0)), \
-                 patch.object(carry_vision, 'RobotEye', side_effect=[head, belly]), \
+                 patch.object(carry_vision, 'RobotEye', side_effect=[head, belly]) as eye_factory, \
                  patch.object(carry_vision, 'find_blocks', side_effect=lambda image, color, near=False: [pickup] if image is bf else []), \
                  patch.object(carry_vision, 'read_qr_codes', side_effect=lambda *args: [('action2', drop)] if found_qr else []), \
                  patch.dict('sys.modules', {'Head': types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs: servo),
@@ -438,13 +519,25 @@ class CompetitionTests(unittest.TestCase):
                  patch.object(cv2, 'waitKey', return_value=-1), \
                  patch('time.monotonic', side_effect=iter(i*.1 for i in range(2000))):
                 self.assertTrue(carry_vision.run('blue', 'action2', actions=True, robot=robot,
-                                                search_right_actions=2, deadline=999))
+                                                search_right_actions=2, deadline=999,
+                                                eyes=(head,belly) if shared else None,
+                                                servo=servo if shared else None))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['HOLD_BOX', 'RIGHT_HOLDBOX', 'DOWN_BOX'])
         factory.assert_not_called();robot.close.assert_not_called()
-        head.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
+        if shared:
+            eye_factory.assert_not_called()
+            head.close.assert_not_called();belly.close.assert_not_called();servo.cleanup.assert_not_called()
+        else:
+            head.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
 
-    def test_shared_sport_stops_after_ball_recedes_without_repeating_stand(self):
+    def test_shared_carry_search_turns_once_without_new_connection(self):
+        self.check_shared_carry()
+
+    def test_carry_completes_without_opening_or_closing_borrowed_cameras(self):
+        self.check_shared_carry(shared=True)
+
+    def check_shared_sport(self, shared=False):
         import handover_debug
         from dual_kick import camera_settings
         settings = camera_settings()
@@ -467,7 +560,7 @@ class CompetitionTests(unittest.TestCase):
             (root/'config/head_calibration.json').write_text(json.dumps(head_profile))
             (root/'config/right_foot_reference.json').write_text(json.dumps(foot))
             with patch.object(handover_debug, 'ROOT', root), \
-                 patch.object(handover_debug, 'RobotEye', side_effect=[head, belly]), \
+                 patch.object(handover_debug, 'RobotEye', side_effect=[head, belly]) as eye_factory, \
                  patch.object(handover_debug, 'PatchTracker', side_effect=trackers), \
                  patch.object(handover_debug, 'start_robot') as factory, \
                  patch.dict('sys.modules', {'Head': types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs: servo)}), \
@@ -475,9 +568,22 @@ class CompetitionTests(unittest.TestCase):
                  patch.object(cv2, 'waitKey', return_value=-1), \
                  patch('time.monotonic', side_effect=iter(i*.01 for i in range(10000))):
                 self.assertTrue(handover_debug.run(fps=settings['head']['fps'], actions=True,
-                                                  robot=robot, deadline=999))
+                                                  robot=robot, deadline=999,
+                                                  eyes=(head,belly) if shared else None,
+                                                  servo=servo if shared else None))
         robot.robotMove.assert_called_once_with('UP_LITTLE')
         factory.assert_not_called();robot.close.assert_not_called()
+        if shared:
+            eye_factory.assert_not_called()
+            head.close.assert_not_called();belly.close.assert_not_called();servo.cleanup.assert_not_called()
+        else:
+            head.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
+
+    def test_shared_sport_stops_after_ball_recedes_without_repeating_stand(self):
+        self.check_shared_sport()
+
+    def test_sport_completes_without_opening_or_closing_borrowed_cameras(self):
+        self.check_shared_sport(shared=True)
 
     def test_missing_music_does_not_send_dance(self):
         io = CompetitionIO(self.settings(), Mock(), float('inf'))

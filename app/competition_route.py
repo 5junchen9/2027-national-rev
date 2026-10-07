@@ -16,6 +16,7 @@ class RouteVision:
         self.expected = self.camera = None
         self.frames = 0
         self.reached = False
+        self.candidate_seen = False
         self.error = None
         self.thread = threading.Thread(target=self.capture, daemon=True)
         self.thread.start()
@@ -25,10 +26,15 @@ class RouteVision:
             self.expected, self.camera = expected, camera
             self.frames = 0
             self.reached = False
+            self.candidate_seen = False
 
     def saw_target(self):
         with self.condition:
             return self.reached
+
+    def saw_candidate(self):
+        with self.condition:
+            return self.candidate_seen
 
     def discard(self):
         with self.condition:
@@ -41,11 +47,18 @@ class RouteVision:
                 okb, belly = self.belly_eye.getImage()
                 if not okh or not okb:
                     raise RuntimeError('比赛双摄读取失败')
-                codes = {'head': self.decode(head), 'belly': self.decode(belly)}
+                # 路标阶段只解码指定相机；不让另一相机的增强解码拖慢路标判断。
                 with self.condition:
-                    if self.expected is not None:
+                    expected, camera = self.expected, self.camera
+                codes = {'head': [], 'belly': []}
+                if expected is not None:
+                    codes[camera] = self.decode(head if camera == 'head' else belly)
+                with self.condition:
+                    if expected is not None and (expected, camera) == (self.expected, self.camera):
                         contents = [text for text, _ in codes[self.camera]]
                         self.frames = self.frames+1 if contents.count(self.expected) == 1 else 0
+                        if contents.count(self.expected) == 1:
+                            self.candidate_seen = True
                         if self.frames >= self.confirm_frames:
                             # 记住动作期间扫到的路标，不要求动作结束后仍在画面内。
                             self.reached = True

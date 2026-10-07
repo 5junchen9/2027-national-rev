@@ -68,7 +68,7 @@ def infer_identity(image, detector, gender, ocr, source, state):
     return state['name'], state['gender_label'], state['gender_score'], state['name_score'], timings
 
 
-def recognize(root, position, timeout):
+def recognize(root, position, timeout, eye=None, head=None):
     from Head import RobotHeadServoOnly
     from roboteye import RobotEye
     from robot_audio import configure
@@ -87,10 +87,12 @@ def recognize(root, position, timeout):
         detector, gender, ocr = load_models(root)
         for resource in (detector, gender, ocr):
             stack.callback(resource.close)
-        eye = RobotEye(latest=True)
-        stack.callback(eye.close)
-        head = RobotHeadServoOnly(hold=True)
-        stack.callback(head.cleanup)
+        if eye is None:
+            eye = RobotEye(latest=True)
+            stack.callback(eye.close)
+        if head is None:
+            head = RobotHeadServoOnly(hold=True)
+            stack.callback(head.cleanup)
         stack.callback(cv2.destroyAllWindows)
         head.turn_vertical(position)
         eye.discard_frames(1)

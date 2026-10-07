@@ -130,7 +130,7 @@ class Handover:
 
 
 def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False,
-        robot=None, deadline=None):
+        robot=None, deadline=None, eyes=None, servo=None):
     if not 0 < fps <= 120 or not .08 <= settle <= 2.0:
         raise ValueError('fps must be >0..120; settle must be 0.08..2.0s')
     head_profile = json.loads((ROOT/'config/head_calibration.json').read_text(encoding='utf-8-sig'))
@@ -165,8 +165,11 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False,
             try: cv2.destroyAllWindows()
             except cv2.error: pass
         stack.callback(close_windows)
-        head = RobotEye(**settings['head'],latest=True); stack.callback(head.close)
-        belly = RobotEye(**settings['belly'],latest=True); stack.callback(belly.close)
+        if eyes is None:
+            head = RobotEye(**settings['head'],latest=True); stack.callback(head.close)
+            belly = RobotEye(**settings['belly'],latest=True); stack.callback(belly.close)
+        else:
+            head, belly = eyes
         # Verify both saved image sizes before applying the requested forward pose.
         okh,initial_head = head.getImage(); okb,initial_belly = belly.getImage()
         if (not okh or not okb or list(initial_head.shape[:2]) != head_profile['shapes']['head']
@@ -179,7 +182,8 @@ def run(forward=INITIAL_HEAD_POSITION, fps=30, settle=.18, actions=False,
             # 启动站姿后必须读取新画面，再做行走判断。
             body_ready_at = time.monotonic()+.5
         from Head import RobotHeadServoOnly
-        servo = RobotHeadServoOnly(hold=True); stack.callback(servo.cleanup)
+        if servo is None:
+            servo = RobotHeadServoOnly(hold=True); stack.callback(servo.cleanup)
         servo.turn_vertical(state.forward)
         enabled = True
         head.discard_frames(1); belly.discard_frames(1)

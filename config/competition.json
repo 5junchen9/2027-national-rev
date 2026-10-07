@@ -12,7 +12,7 @@
   "route_timeout_seconds": 90,
   "observe_seconds": 1.0,
   "after_sber_steps": 1,
-  "sber_right_actions": 4,
+  "sber_right_actions": 3,
   "action1_right_actions": 4,
   "factory_entry_forward_steps": 3,
   "delivery_search_right_actions": 5,
