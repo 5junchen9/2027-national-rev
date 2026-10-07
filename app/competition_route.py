@@ -161,9 +161,6 @@ def run_course(io, color):
     io.phase("寻找action1")
     io.scan_until(settings["carry_qr"], "belly")
     io.right(settings["action1_right_actions"])
-    io.phase("工厂入口直线接近")
-    # 先走现场配置的小步，再由双摄搬运完成剩余接近距离。
-    io.forward(settings["factory_entry_forward_steps"])
     io.phase("指定颜色搬运")
     io.carry(color, settings["drop_qr"])
     io.phase("返回赛道")

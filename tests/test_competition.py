@@ -213,10 +213,10 @@ class CompetitionTests(unittest.TestCase):
                               ('action1', 'belly'), ('dance', 'head')])
             self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 3, 4, count, 7])
             io.left.assert_called_once_with(1)
-            self.assertEqual([call.args[0] for call in io.forward.call_args_list], [1, 3, 1])
+            self.assertEqual([call.args[0] for call in io.forward.call_args_list], [1, 1])
             calls = [call[0] for call in io.method_calls]
             carry_index = calls.index('carry')
-            self.assertEqual(calls[carry_index-2:carry_index], ['forward', 'phase'])
+            self.assertEqual(calls[carry_index-2:carry_index], ['right', 'phase'])
             io.carry.assert_called_once_with(color, io.settings['drop_qr'])
             io.dance.assert_called_once()
 
@@ -229,7 +229,6 @@ class CompetitionTests(unittest.TestCase):
         calls = [call for call in io.method_calls if call[0] != 'phase']
         self.assertEqual([call[0] for call in calls[:5]],
                          ['scan_until','left','identity','right','scan_until'])
-        io.forward.assert_any_call(io.settings['factory_entry_forward_steps'])
 
     def test_time_guard_rejects_motion_before_sending(self):
         robot = Mock()

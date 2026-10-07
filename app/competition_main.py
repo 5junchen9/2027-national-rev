@@ -24,8 +24,7 @@ def load_settings(path):
     counts = [settings[key] for key in (
         "after_sber_steps", "sber_right_actions", "action1_right_actions",
         "delivery_search_right_actions", "after_return_steps",
-        "after_sport_right_actions", "blue_extra_steps", "route_max_steps",
-        "factory_entry_forward_steps")]
+        "after_sport_right_actions", "blue_extra_steps", "route_max_steps")]
     counts += list(settings["return_right_actions"].values())
     if any(type(count) is not int or not 0 <= count <= 30 for count in counts):
         raise ValueError("运动次数须为0至30的整数")
