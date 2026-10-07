@@ -12,18 +12,28 @@ from roboteye import RobotEye
 from dual_kick import camera_settings
 from kick_shapes import Box, overlap
 from handover_debug import Handover
-from walk_kick import WalkKick
 from ball_debug import distinct_from_background
 
 INITIAL_HEAD_POSITION = 123
 DELIVERY_HEAD_POSITION = 120
 TRACK_FRAMES = 2
 PICKUP_FRAMES = 2
-FINAL_FRAMES = 5  # 放下与保存标定仍确认5帧。
+FINAL_FRAMES = 5  # 保存标定仍确认5帧。
 NEAR_BOTTOM = .88
 TRANSFER_STEPS = 3  # 只限制近处目标丢失后的无目标小步，不限制看得见目标时的正常靠近。
-PICKUP_TOP = .30  # 底边出画后，用可见上沿的试验线判断；需现场验证。
-DROP_BOTTOM = .85  # 临时近处标准：120头位，二维码下沿到画面下方。
+PICKUP_TOP = .20  # 从底部算80%，即从顶部算20%；上沿到线或在线上方才抱。
+QR_WAIT_SECONDS = 5.0
+DELIVERY_OBSERVE_SECONDS = 1.2  # 二维码搬运每个身体动作结束后，等待画面稳定。
+RUN_SECONDS = 300
+HEAD_STEP = 6  # 舵机控制单位，不是物理角度。
+HEAD_SEARCH_STEP = 3
+HEAD_SEARCH_MIN = 120
+HEAD_SEARCH_MAX = 140
+HEAD_SEARCH_WAIT = 1.5
+DROP_FRAMES = 3
+DROP_SIZE_MIN = .90  # 实测投放参考的宽、高允许小10%，停止在参考附近。
+DROP_SIZE_MAX = 1.20  # 超过参考20%时停止，避免继续靠近立牌。
+DROP_POSITION_TOLERANCE = .06
 BODY_SERIAL_PORT = '/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0'
 REFERENCE_FILE = ROOT/'config/carry_dual_reference.json'
 COLORS = {
@@ -80,7 +90,8 @@ def find_blocks(frame, color, near=False):
         if near and y+h >= height-3 and area < height*width*.03:
             continue
         touches_side = x <= 5 or x+w >= width-5
-        if not near and (touches_side or w*h > height*width*.85):
+        partial_head = y+h >= height-3 and w >= width*.15 and w*h >= height*width*.04
+        if not near and ((touches_side and not partial_head) or w*h > height*width*.85):
             continue
         # 全屏蓝色没有足够边缘信息，不能当作近处盒子。
         if x <= 2 and y <= 2 and x+w >= width-2 and y+h >= height-2:
@@ -194,15 +205,25 @@ class DestinationTracker(StableTarget):
         return super().update([best_box])
 
 
-def block_appearance(frame, box):
-    """只统计目标框内饱和色像素的HSV分布，减少木地板和白贴纸影响。"""
+def block_appearance(frame, box, color=None):
+    """腹部只比较所选颜色的色相；不让饱和度和框内地板比例主导身份。"""
     x,y,w,h = map(int,(box.x,box.y,box.width,box.height))
     patch = frame[max(0,y):y+h,max(0,x):x+w]
     if patch.size == 0: return None
     hsv = cv2.cvtColor(patch,cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv,(0,80,60),(179,255,255))
     if cv2.countNonZero(mask) < 30: return None
-    histogram = cv2.calcHist([hsv],[0,1],mask,[18,8],[0,180,0,256])
+    if color is not None:
+        selected = np.zeros(hsv.shape[:2],np.uint8)
+        for low,high in COLORS[color]:
+            selected |= cv2.inRange(hsv,(low,80,60),(high,255,255))
+        mask &= selected
+        if cv2.countNonZero(mask) < 30: return None
+        histogram = cv2.calcHist([hsv],[0],mask,[18],[0,180])
+        # 相邻色相区间平滑，减少蓝色在直方图格子边界跳变的影响。
+        histogram = .5*histogram+.25*np.roll(histogram,1,axis=0)+.25*np.roll(histogram,-1,axis=0)
+    else:
+        histogram = cv2.calcHist([hsv],[0,1],mask,[18,8],[0,180,0,256])
     return histogram/cv2.sumElems(histogram)[0]
 
 
@@ -237,8 +258,9 @@ def block_quality(frame, box, color):
 
 class BlockTracker(StableTarget):
     """动作后保留目标身份；旧框只供找回，不作为当前动作依据。"""
-    def __init__(self, recover_head=False):
+    def __init__(self, recover_head=False, near=False):
         self.recover_head = recover_head
+        self.near = near
         super().__init__()
 
     def reset(self):
@@ -251,12 +273,14 @@ class BlockTracker(StableTarget):
         self.appearance = None
         self.motion = None
         self.scores = []
+        self.recovery = StableTarget()
 
     def update(self, candidates, now=None, frame=None, color=None):
         now = time.monotonic() if now is None else now
         previous = self.box if self.box is not None else self.identity_box
         candidates = remove_nested_boxes(candidates)
         ranked = []
+        changed_appearance = set()
         self.scores = []
         self.rejections = {}
         self.reason = "no candidate"
@@ -295,7 +319,16 @@ class BlockTracker(StableTarget):
             else:
                 wr = candidate.width/previous.width
                 hr = candidate.height/previous.height
-                if self.motion is None:
+                partial = (self.near and frame is not None
+                           and (candidate.bottom >= frame.shape[0]-3 or previous.bottom >= frame.shape[0]-3))
+                if partial:
+                    # 近处盒面放大或出画时，宽高比不能继续作为身份门槛。
+                    horizontal = max(0,min(previous.x+previous.width,candidate.x+candidate.width)
+                                     -max(previous.x,candidate.x))
+                    if horizontal < .5*min(previous.width,candidate.width):
+                        self.rejections[candidate] = "position mismatch"
+                        self.scores.append((candidate,0.0,color_score,shape_score));continue
+                elif self.motion is None:
                     if overlap(previous,candidate) < .25 or not (.5 <= wr <= 2 and .5 <= hr <= 2):
                         self.rejections[candidate] = "position/size mismatch"
                         self.scores.append((candidate,0.0,color_score,shape_score));continue
@@ -309,17 +342,29 @@ class BlockTracker(StableTarget):
                         self.scores.append((candidate,0.0,color_score,shape_score));continue
                 distance = 0.0
                 if frame is not None and self.appearance is not None:
-                    appearance = block_appearance(frame,candidate)
+                    appearance = block_appearance(frame,candidate,color if self.near else None)
                     if appearance is None:
                         self.rejections[candidate] = "appearance missing"
                         continue
                     distance = cv2.compareHist(self.appearance,appearance,cv2.HISTCMP_BHATTACHARYYA)
                     if distance > .5:
-                        self.rejections[candidate] = "appearance mismatch"
-                        self.scores.append((candidate,0.0,color_score,shape_score));continue
-                cost = abs(math.log(wr))+abs(math.log(hr))+distance*2
-                cost += abs(candidate.cx-previous.cx)/previous.width*.3
-                if self.motion != 'head':
+                        horizontal = max(0,min(previous.x+previous.width,candidate.x+candidate.width)
+                                         -max(previous.x,candidate.x))
+                        vertical = max(0,min(previous.bottom,candidate.bottom)-max(previous.y,candidate.y))
+                        coverage = horizontal*vertical/min(previous.width*previous.height,
+                                                           candidate.width*candidate.height)
+                        same_region = (coverage >= .5 and
+                                       abs(candidate.cx-previous.cx) <= .35*max(previous.width,candidate.width))
+                        if not (self.near and color is not None and len(candidates) == 1
+                                and color_score >= .45 and shape_score >= .45 and same_region):
+                            self.rejections[candidate] = "appearance mismatch"
+                            self.scores.append((candidate,0.0,color_score,shape_score));continue
+                        # 新画面强颜色证据和位置连续时重新确认，仍需当前框稳定2帧。
+                        changed_appearance.add(candidate)
+                        distance = .35
+                cost = distance*2 if partial else abs(math.log(wr))+abs(math.log(hr))+distance*2
+                cost += abs(candidate.cx-previous.cx)/max(previous.width,candidate.width)*.3
+                if self.motion != 'head' and not partial:
                     cost += abs(candidate.cy-previous.cy)/previous.height*.3
                 association = math.exp(-cost)
                 # 已锁定时关联占主要权重，避免另一个更亮的盒子抢锁。
@@ -334,6 +379,35 @@ class BlockTracker(StableTarget):
         if not ranked or (len(ranked) > 1 and ranked[0][0]-ranked[1][0] < lead_required):
             self.frames = 0
             self.reason = "ambiguous candidates" if ranked else ", ".join(sorted(set(self.rejections.values()))) or "no candidate"
+            # 腹部旧位置失配时，用当前单个强候选连续3帧重新建立位置参考。
+            # 不退回头部、不按旧框走，也不接受多个候选或弱颜色区域。
+            recover_position = (self.near and frame is not None and color is not None
+                                and len(candidates) == 1 and self.reason in
+                                ('position mismatch','position/size mismatch','size mismatch','association weak'))
+            if recover_position:
+                candidate = candidates[0]
+                color_score,shape_score = block_quality(frame,candidate,color)
+                strong = (color_score >= .45 and shape_score >= .45
+                          and candidate.width*candidate.height >= frame.shape[0]*frame.shape[1]*.03)
+                if strong:
+                    self.recovery.update([candidate])
+                    count = self.recovery.frames
+                    self.reason = f'belly position reconfirm {count}/3; hold body'
+                    if count >= 3:
+                        self.box = self.identity_box = candidate
+                        self.frames = count
+                        self.appearance = block_appearance(frame,candidate,color)
+                        self.last_seen = now
+                        self.lost_since = self.motion = None
+                        self.rejections = {}
+                        self.scores = [(candidate,.65*color_score+.35*shape_score,color_score,shape_score)]
+                        self.recovery.reset()
+                        self.reason = 'belly position recovered; current target confirmed'
+                        return candidate
+                else:
+                    self.recovery.reset()
+            else:
+                self.recovery.reset()
             if previous is not None:
                 if self.lost_since is None: self.lost_since = now
                 if self.recover_head and now-self.lost_since >= 2.0:
@@ -347,15 +421,18 @@ class BlockTracker(StableTarget):
                 self.box = None
                 if self.motion is None: self.motion = 'body'
             return None
+        self.recovery.reset()
         self.lost_since = None
         self.reason = "confirming target"
         box = ranked[0][1]
-        stable = self.box is not None and overlap(self.box,box) >= .45
+        stable = box not in changed_appearance and self.box is not None and overlap(self.box,box) >= .45
         self.frames = self.frames+1 if stable else 1
         self.box = self.identity_box = box
         self.last_seen = now
-        if self.appearance is None and frame is not None:
-            self.appearance = block_appearance(frame,box)
+        if frame is not None and (self.appearance is None or box in changed_appearance or self.near and self.frames >= TRACK_FRAMES):
+            self.appearance = block_appearance(frame,box,color if self.near else None)
+        if box in changed_appearance:
+            self.reason = 'box appearance changed; reconfirm current region'
         if self.frames >= TRACK_FRAMES: self.motion = None
         return box
 
@@ -363,11 +440,13 @@ class BlockTracker(StableTarget):
         self.frames = 0
         self.motion = 'body'
         self.scores = []
+        self.recovery.reset()
 
     def after_head_move(self):
         self.frames = 0
         self.motion = 'head'
         self.scores = []
+        self.recovery.reset()
 
 
 def clipped_edges(box):
@@ -382,10 +461,17 @@ def near_head_target(box):
             and box.width >= .30 and box.width*box.height >= .10)
 
 
+def follow_head_angle(box, angle):
+    """稳定目标临近上下边缘时转头；每次转头后须重新确认目标。"""
+    if box.cy > .65: return min(HEAD_SEARCH_MAX,angle+HEAD_STEP)
+    if box.cy < .25: return max(HEAD_SEARCH_MIN,angle-HEAD_STEP)
+    return angle
+
+
 def region_pickup_action(box, reference, flip):
-    """H只提供横向位置和近处区域；不比较不同尺寸盒子的宽高。"""
+    """H只提供横向对齐参考；距离统一按方块上沿判断。"""
     target = Box(*reference['pickup'])
-    left,top,right,bottom = reference['pickup_clipped']
+    left,_,right,_ = reference['pickup_clipped']
     if left and not right:
         dx = box.x+box.width-target.x-target.width
     elif right and not left:
@@ -394,29 +480,19 @@ def region_pickup_action(box, reference, flip):
         dx = box.cx-target.cx
     if abs(dx) > .10:
         return steering('SIDE_LEFT' if dx < 0 else 'SIDE_RIGHT',flip)
-    target_bottom = .90 if bottom else target.bottom
-    if clipped_edges(box)[3]:
-        return 'UP_LITTLE' if box.y > PICKUP_TOP else 'HOLD_BOX'
-    if not clipped_edges(box)[3] and box.bottom > target_bottom+.12: return 'STOP'
-    if box.bottom < target_bottom-.08: return 'UP_LITTLE'
-    return 'HOLD_BOX'
+    return 'UP_LITTLE' if box.y > PICKUP_TOP else 'HOLD_BOX'
 
 
 
 def pickup_action(box, reference, flip):
-    """H提供大致范围；底边出画时根据可见盒面判断，不把画面边缘当真实底边。"""
+    """横向对齐后，上沿到达顶部20%横线才抱；旧H下沿不终止接近。"""
     if reference.get('pickup_mode') == 'visible_region':
         return region_pickup_action(box,reference,flip)
     target = Box(*reference['pickup'])
     dx = box.cx-target.cx
     if abs(dx) > .10:
         return steering('SIDE_LEFT' if dx < 0 else 'SIDE_RIGHT',flip)
-    if clipped_edges(box)[3]:
-        # 不再将底边出画等同于可抱；每小步重新观察可见上沿。
-        return 'UP_LITTLE' if box.y > PICKUP_TOP else 'HOLD_BOX'
-    if box.bottom > target.bottom+.12: return 'STOP'
-    if box.bottom < target.bottom-.08: return 'UP_LITTLE'
-    return 'HOLD_BOX'
+    return 'UP_LITTLE' if box.y > PICKUP_TOP else 'HOLD_BOX'
 
 
 def steering(action, flip):
@@ -429,6 +505,21 @@ def steering(action, flip):
     return action
 
 
+def drop_reference(reference):
+    """只接受120头位、完整画面内的D参考，不用默认横线代替投放位置。"""
+    if not reference or reference.get('drop_head_position') != DELIVERY_HEAD_POSITION:
+        return None
+    values = reference.get('drop')
+    if not isinstance(values,(list,tuple)) or len(values) != 4:
+        return None
+    if not all(isinstance(value,(int,float)) and math.isfinite(value) for value in values):
+        return None
+    box = Box(*values)
+    if box.width <= 0 or box.height <= 0 or box.x < 0 or box.y < 0 or box.x+box.width > 1 or box.bottom > 1:
+        return None
+    return box
+
+
 class CarryPlanner:
     def __init__(self, reference, flip):
         self.reference = reference
@@ -439,19 +530,19 @@ class CarryPlanner:
         self.pending = None
         self.confirm_frames = 0
         self.delivery_aligned = False
-        self.clipped_steps = 0
-        self.pending_clipped = False
+        self.belly_approach_steps = 0
+        self.pending_belly_approach = False
         self.reason = 'looking for selected block color'
 
     def reset_confirmation(self):
         self.pending = None
         self.confirm_frames = 0
 
-    def decide(self, box, stable_frames, now=None):
+    def decide(self, box, stable_frames, now=None, decoded=True):
         now = time.monotonic() if now is None else now
         if self.phase == 'DONE': return 'DONE'
-        if self.actions >= 40 or now-self.started_at >= 180:
-            self.reason = '40 actions / 180 seconds limit'
+        if self.actions >= 40 or now-self.started_at >= RUN_SECONDS:
+            self.reason = f'40 actions / {RUN_SECONDS} seconds limit'
             return 'STOP'
         if box is None or stable_frames < 1:
             self.reset_confirmation()
@@ -459,45 +550,58 @@ class CarryPlanner:
             return 'WAIT'
         if self.phase == 'PICKUP':
             action = pickup_action(box,self.reference,self.flip)
-            self.pending_clipped = clipped_edges(box)[3]
-            self.reason = (f'partial box top={box.y:.0%}, pickup line=30%; '+action
-                           if self.pending_clipped else 'belly pickup: relaxed H reference; '+action)
-            if self.pending_clipped and action == 'UP_LITTLE' and self.clipped_steps >= 6:
+            self.pending_belly_approach = True
+            self.reason = f'belly top={box.y:.1%}, pickup line=20% (80% from bottom); '+action
+            if action == 'UP_LITTLE' and self.belly_approach_steps >= 6:
                 self.reason = '6 belly approach steps without reaching pickup line; stop'
                 return 'STOP'
-            if action in ('WAIT','STOP'):
-                self.reset_confirmation()
-                return action
         else:
-            # 旧129头位的D参考不能用于新的120头位。
-            drop = self.reference.get('drop')
-            if drop is not None and self.reference.get('drop_head_position') == DELIVERY_HEAD_POSITION:
-                target = Box(*drop)
-                target_x, target_bottom = target.cx, target.bottom
-            else:
-                target_x, target_bottom = .5, DROP_BOTTOM
-            dx = box.cx-target_x
+            target = drop_reference(self.reference)
+            if target is None:
+                self.reason = 'STOP: valid D placement reference at head120 required'
+                return 'STOP'
+            width_ratio = box.width/target.width
+            height_ratio = box.height/target.height
+            dx = box.cx-target.cx
             tolerance = .16 if self.delivery_aligned else .12
+            near = min(width_ratio,height_ratio)+1e-6 >= DROP_SIZE_MIN
+            if max(width_ratio,height_ratio) > DROP_SIZE_MAX:
+                self.reason = 'STOP: QR larger than placement reference; too close or view changed'
+                return 'STOP'
+            if not .80 <= width_ratio/height_ratio <= 1.25:
+                self.reset_confirmation()
+                self.reason = 'QR shape differs from placement reference; hold body'
+                return 'WAIT'
+            if near:
+                tolerance = DROP_POSITION_TOLERANCE
             if abs(dx) > tolerance:
                 self.delivery_aligned = False
                 action = 'LEFT_HOLDBOX' if dx < 0 else 'RIGHT_HOLDBOX'
                 action = steering(action,self.flip)
                 self.reason = 'turn toward target QR'
-            elif box.bottom < target_bottom-.03:
+            elif not near:
                 self.delivery_aligned = True
                 action = 'UP_HOLDBOX'
-                self.reason = 'approach target bottom reference'
+                self.reason = f'approach placement size: W={width_ratio:.0%} H={height_ratio:.0%}'
+            elif abs(box.cy-target.cy) > DROP_POSITION_TOLERANCE:
+                self.reset_confirmation()
+                self.reason = 'placement size reached but vertical position differs; hold body'
+                return 'WAIT'
+            elif not decoded:
+                self.reset_confirmation()
+                self.reason = 'placement near; need fresh exact QR decode before release'
+                return 'WAIT'
             else:
                 self.delivery_aligned = True
                 action = 'DOWN_BOX'
-                self.reason = 'QR near bottom; release'
+                self.reason = f'placement reference reached: W={width_ratio:.0%} H={height_ratio:.0%}; release'
         self.confirm_frames = self.confirm_frames+1 if self.pending == action else 1
         self.pending = action
-        required = FINAL_FRAMES if action == 'DOWN_BOX' else PICKUP_FRAMES if action == 'HOLD_BOX' else TRACK_FRAMES
+        required = DROP_FRAMES if action == 'DOWN_BOX' else PICKUP_FRAMES if action == 'HOLD_BOX' else TRACK_FRAMES
         return action if stable_frames >= TRACK_FRAMES and self.confirm_frames >= required else 'WAIT'
 
     def approach(self, box, stable_frames):
-        self.pending_clipped = False
+        self.pending_belly_approach = False
         if box is None or stable_frames < 1:
             self.reset_confirmation()
             self.reason = 'head target unstable; hold body'
@@ -511,7 +615,7 @@ class CarryPlanner:
         return action if stable_frames >= TRACK_FRAMES and self.confirm_frames >= TRACK_FRAMES else 'WAIT'
 
     def mark_sent(self, action):
-        if action == 'UP_LITTLE' and self.pending_clipped: self.clipped_steps += 1
+        if action == 'UP_LITTLE' and self.pending_belly_approach: self.belly_approach_steps += 1
         # 在发送前改变阶段：失败即退出，不重复抱取/放下。
         if action == 'HOLD_BOX': self.phase = 'DELIVER'
         if action == 'DOWN_BOX': self.phase = 'DONE'
@@ -528,17 +632,21 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                 or reference.get('cameras') != settings
                 or reference.get('target_qr') != target_qr
                 or 'pickup' not in reference):
-            raise ValueError('先用双摄预览按 H 标定腹部抱取位置；D可选，用120头位标定放下位置')
+            raise ValueError('双摄配置或H参考不匹配，请先恢复原相机配置并核对H；实际投放还需120头位D参考')
+        if drop_reference(reference) is None:
+            raise ValueError('实际投放需要120头位的D参考：在物块实际应放下的位置保存D；保留已有H标定')
     planner = CarryPlanner(reference,settings['belly']['flip']) if actions else None
-    handover = Handover(dict(forward=INITIAL_HEAD_POSITION,down_sign=1,bounds=[85,180]))
-    approach = WalkKick()
-    head_tracker,belly_tracker,qr_tracker = BlockTracker(recover_head=True),BlockTracker(),DestinationTracker()
+    handover = Handover(dict(forward=INITIAL_HEAD_POSITION,down_sign=1,
+                             bounds=[HEAD_SEARCH_MIN,HEAD_SEARCH_MAX]))
+    handover.down = HEAD_SEARCH_MAX  # 只覆盖搬运范围，不改变球类任务的共享默认值。
+    head_tracker,belly_tracker,qr_tracker = BlockTracker(recover_head=True),BlockTracker(near=True),DestinationTracker()
     detector = cv2.QRCodeDetector()
     seen_contents = set()
     search_turns = 0
     qr_missing_since = None
     transferring = False
     transfer_steps = 0
+    head_search_direction = 1
     last_qr_x = None
     with ExitStack() as stack:
         head_eye = RobotEye(**settings['head'],latest=True);stack.callback(head_eye.close)
@@ -562,13 +670,18 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
         print('目标颜色:',color,'目的地二维码:',target_qr)
         print('候选显示score总分、C颜色分、S形状分；这是匹配评分，不是识别概率。')
         print('H=123头位/保存腹部抱取位置；D=120头位/保存二维码放下位置；Q=退出。')
-        print('腹部接手后锁定阶段；漏检暂停身体，保留关联0.5秒。H可保存实际可抱位置的局部色块。')
-        print('接近、腹部接手和抱起确认2帧；放下和保存参考仍确认5帧。')
-        print('H仅参考横向位置和近处下沿；不比较盒子尺寸，不追加面积或形状分抱取门槛。')
-        print('腹部底边出画后，上沿到画面上方30%才抱取；每次小步后重新观察，最多6次。30%需现场验证。')
+        print('腹部确认后独占接近控制；旧位置失配时单个强目标稳定3帧重新确认。H可保存局部参考。')
+        print('未确认腹部候选不阻断可靠头部靠近；抱取完成后仅头部二维码识别参与动作，腹部仅预览。')
+        print('接近、腹部接手和抱起确认2帧；放下确认3帧，保存参考仍确认5帧。')
+        print('H仅参考横向位置；不比较盒子尺寸，不追加面积或形状分抱取门槛。')
+        print('腹部目标横向对齐后，上沿到达或高于顶部20%横线（y<=20%）才抱取；每次小步后重新观察，最多6次。上方20%线需现场验证。')
+        print('可见目标跟随每次6单位；丢失搜索每次3单位、观察1.5秒，范围120至140。')
+        print('二维码搬运每次身体动作结束后额外观察1.2秒，再决定下一步。')
+        print('二维码丢失后每个位置原地尝试5秒，再有限转向搜索；搬运总上限300秒、40次身体动作。')
         print('交接须目标居中、下沿到88%、宽度至少30%、框面积至少10%。')
-        print('看得见目标时正常靠近；近处丢失后固定头位，最多惯性前进3次UP_LITTLE，腹部未接手则停止。')
-        print('H或D切换头位后，请等画面稳定再按一次保存。未标定D时按二维码下沿85%放下。')
+        print('看得见目标时正常靠近；近处丢失后先低头找回，到低头边界仍丢失才最多惯性前进3次UP_LITTLE，腹部未接手则停止。')
+        print('实际投放用D位置与宽高参考：宽高达到参考90%至120%、中心接近，且目标二维码连续解码3帧才放下；超过120%停止。')
+        print('在实机确认适合放下的位置保存D，头位120；已有正确D可沿用。缺D不启用身体搬运，不再使用默认下沿横线。')
         while True:
             if deadline is not None and time.monotonic() >= deadline:
                 print('比赛总期限到达，停止搬运');return False
@@ -577,19 +690,28 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
             if dict(head=list(hf.shape[:2]),belly=list(bf.shape[:2])) != shapes:
                 raise ValueError('Camera resolution changed; stop actions')
             head_busy = servo.is_moving()
-            head_blocks,belly_blocks = find_blocks(hf,color),find_blocks(bf,color,near=True)
-            if head_busy:
-                head_tracker.after_head_move()
-                head_block = None
-            else:
-                head_block = head_tracker.update(head_blocks,frame=hf,color=color)
-            belly_block = belly_tracker.update(belly_blocks,frame=bf,color=color)
-            bottom_clipped = belly_block is not None and belly_block.bottom >= bf.shape[0]-3
+            pickup_active = not actions or planner.phase == 'PICKUP'
+            head_blocks = belly_blocks = []
+            head_block = belly_block = None
+            if pickup_active:
+                # 腹部接手后关闭头部找方块；抱起后两路都不再检测方块。
+                if not actions or handover.phase == 'HEAD':
+                    head_blocks = find_blocks(hf,color)
+                    if head_busy:
+                        head_tracker.after_head_move()
+                    else:
+                        head_block = head_tracker.update(head_blocks,frame=hf,color=color)
+                belly_blocks = find_blocks(bf,color,near=True)
+                belly_block = belly_tracker.update(belly_blocks,frame=bf,color=color)
+            bottom_clipped = any(box.bottom >= bf.shape[0]-3 for box in belly_blocks)
             local_pickup = reference is not None and reference.get('pickup_mode') == 'visible_region'
             if planner is not None and planner.phase == 'PICKUP':
                 if belly_tracker.frames >= TRACK_FRAMES:
                     handover.phase = 'BELLY'
                     transferring = False
+                    head_tracker.reset()
+                    head_block = None
+                    head_blocks = []
                 # 腹部接手后锁定阶段，短暂丢失不退回头部前进。
             codes = []
             if not actions or planner.phase != 'PICKUP':
@@ -626,30 +748,40 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                     reason = 'partial block: H can save visible pickup region'
                 cv2.putText(display,reason,(8,48),0,.45,(255,255,255),1)
                 if name == 'belly':
-                    status = f'belly: blocks={len(belly_blocks)} stable={belly_tracker.frames}/{TRACK_FRAMES}'
+                    status = (f'belly: blocks={len(belly_blocks)} stable={belly_tracker.frames}/{TRACK_FRAMES}'
+                              if pickup_active else 'belly: preview only; block detection off')
                 else:
                     status = f'head: blocks={len(head_blocks)} lock={int(head_tracker.identity_box is not None)} frames={head_tracker.frames}/{TRACK_FRAMES} QR={len(matches)} {qr_tracker.source}'
+                    if actions and planner.phase == 'PICKUP' and handover.phase == 'BELLY':
+                        status = 'head: block detection off; belly controls pickup'
                     if actions and planner.phase == 'DELIVER':
-                        status = f'head: QR decoded={len(matches)} {qr_tracker.source} stable={qr_tracker.frames}/{FINAL_FRAMES}'
+                        status = f'head: QR decoded={len(matches)} {qr_tracker.source} stable={qr_tracker.frames}/{DROP_FRAMES}'
                 if name == 'head':
-                    detail = 'target QR: '+qr_tracker.source if actions and planner.phase == 'DELIVER' else head_tracker.reason
+                    detail = ('target QR: '+qr_tracker.source if actions and planner.phase == 'DELIVER'
+                              else 'belly controls pickup; head block detection off'
+                              if actions and handover.phase == 'BELLY' else head_tracker.reason)
                     cv2.putText(display,detail,(8,92),0,.4,(0,255,255),1)
                 selected = belly_block if name == 'belly' else head_block
                 if selected is not None:
                     cv2.rectangle(display,(int(selected.x),int(selected.y)),
                                   (int(selected.x+selected.width),int(selected.bottom)),(0,255,255),3)
                 cv2.putText(display,status,(8,70),0,.5,(255,255,255),1)
-                if name == 'belly' and reference is not None and 'pickup' in reference:
-                    target = Box(*reference['pickup'])
-                    edge = PICKUP_TOP if bottom_clipped else .90 if reference.get('pickup_mode') == 'visible_region' and reference['pickup_clipped'][3] else target.bottom
+                if name == 'belly' and pickup_active and reference is not None and 'pickup' in reference:
+                    edge = PICKUP_TOP
                     y = round(edge*display.shape[0])
                     cv2.line(display,(0,y),(display.shape[1]-1,y),(0,255,255),1)
+                    line_label = 'pickup top: y <= 20% (80% from bottom)'
+                    cv2.putText(display,line_label,(8,max(110,y-6)),0,.4,(0,255,255),1)
                 if name == 'head' and handover.angle == DELIVERY_HEAD_POSITION:
-                    drop_bottom = DROP_BOTTOM
-                    if reference is not None and reference.get('drop_head_position') == DELIVERY_HEAD_POSITION:
-                        drop_bottom = Box(*reference['drop']).bottom
-                    y = round(drop_bottom*display.shape[0])
-                    cv2.line(display,(0,y),(display.shape[1]-1,y),(0,255,255),1)
+                    target = drop_reference(reference)
+                    if target is not None:
+                        height,width = display.shape[:2]
+                        cv2.rectangle(display,(round(target.x*width),round(target.y*height)),
+                                      (round((target.x+target.width)*width),round(target.bottom*height)),(0,255,255),1)
+                        if qr is not None:
+                            current = qr.normalized(display.shape)
+                            cv2.putText(display,f'D size W={current.width/target.width:.0%} H={current.height/target.height:.0%}',
+                                        (8,115),0,.5,(0,255,255),1)
                 cv2.imshow('carry '+name,display)
             key = cv2.waitKey(1)&255
             if key in (ord('q'),27): return False
@@ -670,13 +802,20 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                         print('物块底边出画，不能保存抱取参考。')
                     print('腹部物块' if key == ord('h') else '头部目标二维码',
                           '候选数=',count,'稳定帧=',tracker.frames,'/5；当前不能保存。');continue
+                if key == ord('d') and (qr_tracker.source != 'decoded' or len(matches) != 1):
+                    print('D需当前画面精确解码到唯一目标二维码，不能只用模板跟踪保存。');continue
                 if (reference is None or reference.get('version') not in (2,3)
                         or reference.get('cameras') != settings or reference.get('shapes') != shapes
                         or reference.get('target_qr') != target_qr):
+                    if key == ord('d') and reference is not None:
+                        print('现有标定的相机/尺寸/目标不匹配，D未保存；先恢复原配置，保留原H参考。');continue
                     reference = dict(version=3,cameras=settings,head_position=INITIAL_HEAD_POSITION,
                                      target_qr=target_qr,shapes=shapes)
                 frame = bf if key == ord('h') else hf
                 normalized = box.normalized(frame.shape)
+                if key == ord('d') and (normalized.x <= .01 or normalized.y <= .01
+                                       or normalized.x+normalized.width >= .99 or normalized.bottom >= .99):
+                    print('D需完整二维码，离画面边缘留出距离后再保存。');continue
                 reference['version'] = 3
                 if key == ord('d'): reference['drop_head_position'] = DELIVERY_HEAD_POSITION
                 if key == ord('h'):
@@ -686,14 +825,14 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                 REFERENCE_FILE.write_text(json.dumps(reference,ensure_ascii=False,indent=2))
                 print('已保存:',REFERENCE_FILE)
             if not actions or head_busy or time.monotonic() < ready_at: continue
-            if planner.actions >= 40 or time.monotonic()-planner.started_at >= 180:
-                print('40 actions / 180 seconds limit');return False
+            if planner.actions >= 40 or time.monotonic()-planner.started_at >= RUN_SECONDS:
+                print(f'40 actions / {RUN_SECONDS} seconds limit');return False
             if planner.phase == 'DELIVER' and qr is None and search_right_actions:
                 # 短暂漏读先等，随后向最后看到二维码的一侧有限找回；不按旧框前进或放下。
                 if qr_missing_since is None: qr_missing_since = time.monotonic()
                 planner.reset_confirmation()
                 planner.reason = 'QR missing: hold and reacquire'
-                if len(matches) > 1 or time.monotonic()-qr_missing_since < 2.0: continue
+                if len(matches) > 1 or time.monotonic()-qr_missing_since < QR_WAIT_SECONDS: continue
                 if search_turns >= search_right_actions:
                     print('连续有限搜索后仍未找回目的地二维码，停止');return False
                 search_action = 'LEFT_HOLDBOX' if last_qr_x is not None and last_qr_x < .5 else 'RIGHT_HOLDBOX'
@@ -702,61 +841,75 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                 search_turns += 1;planner.mark_sent(search_action)
                 head_eye.discard_frames(1);belly_eye.discard_frames(1)
                 qr_tracker.after_move();qr_missing_since = None
-                ready_at = time.monotonic()+.5
+                ready_at = time.monotonic()+DELIVERY_OBSERVE_SECONDS
                 continue
             if planner.phase == 'PICKUP':
                 if handover.phase == 'HEAD' and head_block is not None and head_tracker.frames >= TRACK_FRAMES:
                     box = head_block.normalized(hf.shape)
-                    transferring = near_head_target(box)
+                    transferring = transferring or near_head_target(box)
             if planner.phase == 'PICKUP' and handover.phase == 'HEAD':
                 planner.flip = settings['head']['flip']
-                if belly_blocks:
-                    # 腹部第一帧就开始累计位置确认，第二帧接手时不再额外等待。
-                    planner.flip = settings['belly']['flip']
-                    action = planner.decide(belly_block.normalized(bf.shape) if belly_block else None,
-                                            belly_tracker.frames)
-                elif head_block is not None:
+                if head_block is not None:
+                    if head_tracker.frames >= TRACK_FRAMES:
+                        angle = follow_head_angle(head_block.normalized(hf.shape),handover.angle)
+                        if angle != handover.angle:
+                            # 跟随提前continue会跳过下方搜索方向重置；在这里同步重置。
+                            head_search_direction = 1
+                            handover.angle = angle
+                            servo.begin_vertical(angle,settle_seconds=.18)
+                            head_tracker.after_head_move();planner.reset_confirmation()
+                            planner.reason = 'block near image edge; adjust head then reconfirm'
+                            ready_at = time.monotonic()+.6
+                            continue
                     # 当前目标仍可见，按视觉确认靠近，不消耗丢失后的惯性步数。
                     action = planner.approach(head_block.normalized(hf.shape),head_tracker.frames)
+                elif belly_blocks:
+                    action = 'WAIT'
+                    planner.reset_confirmation()
+                    planner.reason = belly_tracker.reason+'; waiting for belly confirmation'
                 elif transferring:
-                    # 只在已确认近处且居中的目标后启用；短暂丢失也保持头位。
+                    # 已确认近处目标丢失，先低头找回；到边界才沿用有限交接小步。
+                    if handover.angle < handover.down:
+                        handover.angle = min(handover.down,handover.angle+HEAD_SEARCH_STEP)
+                        servo.begin_vertical(handover.angle,settle_seconds=.5)
+                        head_tracker.after_head_move();planner.reset_confirmation()
+                        planner.reason = 'near block lost; lower head then observe 1.5s'
+                        ready_at = time.monotonic()+HEAD_SEARCH_WAIT
+                        continue
                     if transfer_steps >= TRANSFER_STEPS:
                         print('近处目标丢失后已惯性前进3次，腹部仍未接手，停止避免撞箱子');return False
                     action = 'UP_LITTLE'
                     planner.reason = f'camera transfer: forward {transfer_steps+1}/{TRANSFER_STEPS}; head fixed'
                     transfer_steps += 1
                 elif head_block is None and not belly_blocks:
-                    action = approach.search_action(time.monotonic())
-                    planner.reason = approach.reason.replace('ball','block')
+                    action = 'LOWER_HEAD' if head_search_direction > 0 else 'RAISE_HEAD'
+                    planner.reason = 'block lost; search by 3 units, observe 1.5s; hold body'
                 else:
                     action = planner.approach(head_block.normalized(hf.shape) if head_block else None,head_tracker.frames)
                 # 未通过关联的候选不能阻止头部搜索；身体仍等待重新确认。
                 if head_block is not None or belly_blocks:
-                    approach.reset_search()
-                    if belly_blocks or action in ('REACQUIRE','LOWER_HEAD','RAISE_HEAD'): action = 'WAIT'
-                if action in ('REACQUIRE','LOWER_HEAD','RAISE_HEAD'):
-                    if action != 'REACQUIRE':
-                        direction = 1 if action == 'LOWER_HEAD' else -1
-                        angle = max(INITIAL_HEAD_POSITION-12,min(handover.down,handover.angle+3*direction))
-                        moved = angle != handover.angle
-                        if not moved: approach.search_head_direction *= -1
-                        if moved:
-                            handover.angle = angle;servo.begin_vertical(angle,settle_seconds=.18)
-                            head_tracker.after_head_move()
-                        approach.mark_head_search(moved)
-                    planner.reason = approach.reason.replace('ball','block')
+                    head_search_direction = 1
+                    if action in ('REACQUIRE','LOWER_HEAD','RAISE_HEAD'): action = 'WAIT'
+                if action in ('LOWER_HEAD','RAISE_HEAD'):
+                    angle = max(HEAD_SEARCH_MIN,min(handover.down,handover.angle+HEAD_SEARCH_STEP*head_search_direction))
+                    if angle in (HEAD_SEARCH_MIN,handover.down): head_search_direction *= -1
+                    if angle != handover.angle:
+                        handover.angle = angle;servo.begin_vertical(angle,settle_seconds=.5)
+                        head_tracker.after_head_move()
+                    ready_at = time.monotonic()+HEAD_SEARCH_WAIT
                     continue
             else:
                 target = belly_block if planner.phase == 'PICKUP' else qr
                 tracker = belly_tracker if planner.phase == 'PICKUP' else qr_tracker
                 planner.flip = settings['belly' if planner.phase == 'PICKUP' else 'head']['flip']
                 action = planner.decide(target.normalized(bf.shape if planner.phase == 'PICKUP' else hf.shape) if target else None,
-                                        tracker.frames)
+                                        tracker.frames, decoded=qr_tracker.source == 'decoded')
+                if planner.phase == 'PICKUP' and target is None:
+                    planner.reason = belly_tracker.reason+'; hold body'
             if action in ('STOP','DONE'):
                 print(planner.reason);return action == 'DONE'
             if action == 'WAIT': continue
             planner.mark_sent(action)
-            approach.reset_observation()
             print('搬运动作:',action);move.robotMove(action)
             if action == 'DOWN_BOX':
                 print('放下动作已执行；物块是否实际到位需要现场确认。');return True
@@ -765,11 +918,13 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                 handover.phase = 'HEAD'
                 handover.angle = DELIVERY_HEAD_POSITION;servo.begin_vertical(DELIVERY_HEAD_POSITION)
             head_eye.discard_frames(1);belly_eye.discard_frames(1)
-            if action == 'HOLD_BOX': head_tracker.after_head_move()
+            if action == 'HOLD_BOX':
+                head_tracker.reset();belly_tracker.reset()
             else: head_tracker.after_body_move()
             belly_tracker.after_body_move();qr_tracker.after_move()
             handover.reset_follow()
-            ready_at = time.monotonic()+.5
+            wait_seconds = DELIVERY_OBSERVE_SECONDS if planner.phase == 'DELIVER' else .5
+            ready_at = time.monotonic()+wait_seconds
 
 
 def choose_task(color=None, target_qr=None):

@@ -97,15 +97,13 @@ class ChineseSpeechTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], [
             "aplay", "-q", "-D", "plughw:CARD=wm8960soundcard,DEV=0", "sample.wav"])
 
-    def test_face_reports_playback_result(self):
-        # 此检查只涉及播报返回值，无需加载摄像头依赖。
-        with patch.dict("sys.modules", {"cv2": types.ModuleType("cv2")}):
-            import face_main
-
-        plugin = object.__new__(face_main.FaceRecognitionPlugin)
-        with patch.object(face_main, "speak_chinese", return_value=False) as speak:
-            self.assertFalse(plugin._welcome("haowenwan"))
-        self.assertEqual(speak.call_args.args[0], "郝文菀同学，欢迎你")
+    def test_face_reports_current_identity_playback_result(self):
+        import face_main
+        from competition_main import CONFIG_FILE, legacy_root, load_settings
+        settings = load_settings(CONFIG_FILE)
+        with patch.object(face_main, "recognize", return_value=False) as recognize:
+            self.assertFalse(face_main.run())
+        recognize.assert_called_once_with(legacy_root(settings),124,60)
 
 
 if __name__ == "__main__":

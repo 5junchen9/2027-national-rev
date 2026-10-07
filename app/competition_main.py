@@ -26,7 +26,8 @@ def load_settings(path):
     counts = [settings[key] for key in (
         "after_sber_steps", "sber_right_actions", "action1_right_actions",
         "delivery_search_right_actions", "after_return_steps",
-        "after_sport_right_actions", "blue_extra_steps", "route_max_steps")]
+        "after_sport_right_actions", "blue_extra_steps", "route_max_steps",
+        "factory_entry_forward_steps")]
     counts += list(settings["return_right_actions"].values())
     if any(type(count) is not int or not 0 <= count <= 30 for count in counts):
         raise ValueError("运动次数须为0至30的整数")
@@ -103,7 +104,10 @@ def preflight(settings):
         if (reference.get("version") not in (2, 3) or reference.get("cameras") != settings_cameras
                 or reference.get("target_qr") != settings["drop_qr"]
                 or "pickup" not in reference):
-            problems.append("双摄搬运标定缺失或视图/目的地不匹配，请先H标定；D可选且使用120头位")
+            problems.append("双摄搬运标定缺失或视图/目的地不匹配，请先恢复原相机配置并核对H标定")
+        from carry_vision import drop_reference
+        if drop_reference(reference) is None:
+            problems.append("缺少有效120头位D投放参考；保留H，在实际放置位置保存D")
     except (OSError, ValueError) as error:
         problems.append("搬运标定：" + str(error))
     try:
@@ -231,13 +235,25 @@ class CompetitionIO:
     def forward(self, count):
         for _ in range(count):
             # 固定补偿段也读取当前摄像头，掉线时不继续。
-            self.observe()
+            self.observe_ready()
             self.move("UP_LITTLE")
 
     def right(self, count):
         for _ in range(count):
-            self.observe()
+            self.observe_ready()
             self.move("TURN_RIGHT")
+
+    def left(self, count):
+        for _ in range(count):
+            self.observe_ready()
+            self.move("TURN_LEFT")
+
+    def observe_ready(self):
+        """动作结束后的观察时间内继续刷新预览，再允许下一个固定动作。"""
+        while True:
+            frames = self.observe()
+            if time.monotonic() >= self.ready_at:
+                return frames
 
     def scan_until(self, content, camera):
         self.open_views()
@@ -355,6 +371,7 @@ def simulate(settings, color):
         def identity(self): print("[模拟识别] 姓名/性别及播报成功；不检验模型")
         def forward(self, count): print("[模拟动作] UP_LITTLE ×", count)
         def right(self, count): print("[模拟动作] TURN_RIGHT ×", count, "；角度未验证")
+        def left(self, count): print("[模拟动作] TURN_LEFT ×", count, "；转向，不是横移")
         def carry(self, color, target): print("[模拟搬运]", color, "HOLD_BOX →", target, "→ DOWN_BOX")
         def sport(self): print("[模拟足球] 行走带球 → 连续确认球远离 → 停止；进球未验证")
         def set_head(self, position): print("[模拟头部]", position)

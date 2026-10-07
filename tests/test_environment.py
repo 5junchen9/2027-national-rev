@@ -51,21 +51,11 @@ class EnvironmentTests(unittest.TestCase):
                 qr_main.scan_route()
         eye.close.assert_called_once()
 
-    def test_face_initialization_failure_releases_camera_and_gpio(self):
+    def test_face_entry_propagates_current_identity_failure(self):
         import face_main
-        eye, head = Mock(), Mock()
-        detector = Mock()
-        detector.empty.return_value = False
-        with patch.dict("sys.modules", {
-            "roboteye": types.SimpleNamespace(RobotEye=lambda: eye),
-            "Head": types.SimpleNamespace(RobotHeadServoOnly=lambda: head),
-            "face_eim": types.SimpleNamespace(FaceClassifier=Mock(side_effect=RuntimeError("bad model")))}), \
-                patch.object(face_main.cv2, "CascadeClassifier", return_value=detector, create=True), \
-                patch.object(face_main.cv2, "destroyAllWindows", create=True):
+        with patch.object(face_main, "recognize", side_effect=RuntimeError("bad model")):
             with self.assertRaisesRegex(RuntimeError, "bad model"):
-                face_main.FaceRecognitionPlugin()
-        eye.close.assert_called_once()
-        head.cleanup.assert_called_once()
+                face_main.run(quick=True)
 
     def test_microphone_commands_accept_asr_word_spacing(self):
         from voice_control import command_for

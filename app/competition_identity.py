@@ -45,22 +45,27 @@ def choose_face(faces):
     return faces[0] if faces else None
 
 
-def infer_identity(image, detector, gender, ocr, source):
-    """一帧完整识别；只由后台线程调用，模型不会被并发使用。"""
+def infer_identity(image, detector, gender, ocr, source, state):
+    """对齐单独版的隔帧推理；后台每次仍检测新画面中的人脸。"""
     started = time.monotonic()
     face = choose_face(detector.detect(image))
     detected = time.monotonic()
     if face is None:
+        state.update(frame_index=0, name=None, name_score=None,
+                     gender_label=None, gender_score=0.0)
         return None, None, 0.0, None, (detected - started, 0.0, 0.0)
     x, y, width, height = (int(value) for value in face[:4])
-    left, top, size = source.square_face_box(image.shape, (x, y, width, height))
-    crop = image[top:top + size, left:left + size]
-    gender_label, gender_score = gender.classify(crop)
+    if state['frame_index'] % source.GENDER_INTERVAL == 0:
+        left, top, size = source.square_face_box(image.shape, (x, y, width, height))
+        crop = image[top:top + size, left:left + size]
+        state['gender_label'], state['gender_score'] = gender.classify(crop)
     classified = time.monotonic()
-    name, name_score = ocr.read_name(image, (x, y, width, height))
+    if state['frame_index'] % source.OCR_INTERVAL == 0:
+        state['name'], state['name_score'] = ocr.read_name(image, (x, y, width, height))
+    state['frame_index'] += 1
     finished = time.monotonic()
     timings = (detected - started, classified - detected, finished - classified)
-    return name, gender_label, gender_score, name_score, timings
+    return state['name'], state['gender_label'], state['gender_score'], state['name_score'], timings
 
 
 def recognize(root, position, timeout):
@@ -74,7 +79,10 @@ def recognize(root, position, timeout):
 
     # 只借用同学的裁剪、性别名称和播报；不调用其旧头部驱动或五人模型。
     source = load_source(root, "app/face_main.py", "colleague_face")
-    confirm_frames = 3  # 不沿用robot_env旧五人识别的两帧设置。
+    confirm_frames = 3  # 保持比赛三帧门槛，不被旧项目的环境变量改成两帧。
+    state = dict(frame_index=0, name=None, name_score=None,
+                 gender_label=None, gender_score=0.0)
+    print(f'[人脸配置] 头位={position}；性别每{source.GENDER_INTERVAL}个有效人脸帧、OCR每{source.OCR_INTERVAL}帧更新；中间复用结果。')
     with ExitStack() as stack:
         detector, gender, ocr = load_models(root)
         for resource in (detector, gender, ocr):
@@ -102,7 +110,7 @@ def recognize(root, position, timeout):
             # 显示、检测和OCR使用同一幅纠正后的图，不改其它阶段的标定。
             image = cv2.flip(image, 1)
             if pending is not None and pending.done():
-                # 每个后台结果只消费一次，预览刷新的次数不参与连续确认。
+                # 每个新检测帧只消费一次；沿用单独版的隔帧缓存，预览刷新不计数。
                 name, gender_label, gender_score, name_score, timings = pending.result()
                 pending = None
                 identity = (name, gender_label) if name and gender_label in source.GENDER_CN else None
@@ -128,7 +136,7 @@ def recognize(root, position, timeout):
             if pending is None:
                 # 不排队：模型忙时继续预览；空闲时只提交当前最新帧。
                 # 拷贝在绘字前完成，OCR不会读到预览状态文字。
-                pending = worker.submit(infer_identity, image.copy(), detector, gender, ocr, source)
+                pending = worker.submit(infer_identity, image.copy(), detector, gender, ocr, source, state)
             preview_frames += 1
             now = time.monotonic()
             if now - preview_started >= 1.0:
@@ -148,7 +156,7 @@ def recognize(root, position, timeout):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--legacy-root", type=Path, required=True)
-    parser.add_argument("--head-position", type=int, default=120)
+    parser.add_argument("--head-position", type=int, default=124)
     parser.add_argument("--timeout", type=float, default=60)
     args = parser.parse_args()
     raise SystemExit(0 if recognize(args.legacy_root.resolve(), args.head_position,

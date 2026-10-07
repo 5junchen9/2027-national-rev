@@ -135,8 +135,12 @@ def run_course(io, color):
     settings = io.settings
     io.phase("寻找face")
     io.scan_until(settings["face_qr"], "belly")
+    io.phase("人脸前小步左转")
+    io.left(1)
     io.phase("姓名和性别识别")
     io.identity()
+    io.phase("人脸完成后小步右转回路线")
+    io.right(1)
     io.phase("寻找sber")
     io.scan_until(settings["factory_qr"], "belly")
     io.forward(settings["after_sber_steps"])
@@ -144,6 +148,9 @@ def run_course(io, color):
     io.phase("寻找action1")
     io.scan_until(settings["carry_qr"], "belly")
     io.right(settings["action1_right_actions"])
+    io.phase("工厂入口直线接近")
+    # 先走现场配置的小步，再由双摄搬运完成剩余接近距离。
+    io.forward(settings["factory_entry_forward_steps"])
     io.phase("指定颜色搬运")
     io.carry(color, settings["drop_qr"])
     io.phase("返回赛道")

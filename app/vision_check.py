@@ -11,9 +11,6 @@ SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
 
 
 def task_label(model, label, score):
-    if model == "face":
-        from face_main import FACE_NAMES, FACE_CONFIDENCE
-        return label if label in FACE_NAMES and score >= FACE_CONFIDENCE else "unknown"
     from emotion_main import decide_emotion
     return decide_emotion(label, score)
 
@@ -39,7 +36,7 @@ def evaluate(classifier, path, model):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=("face", "emotion"), required=True)
+    parser.add_argument("--model", choices=("emotion",), required=True)
     samples = parser.add_mutually_exclusive_group()
     samples.add_argument("--image", type=Path, help="already cropped face image")
     samples.add_argument("--dataset", type=Path, help="label folders containing cropped test images")

@@ -11,7 +11,7 @@ import numpy as np
 import competition_main
 from competition_main import CompetitionIO, GuardedRobot, load_settings
 from competition_route import QRStepPlanner, RouteVision, BlueEntry, blue_ratios, run_course
-from competition_identity import choose_face, recognize, load_source, load_models
+from competition_identity import choose_face, recognize, load_source, load_models, infer_identity
 
 
 class CompetitionTests(unittest.TestCase):
@@ -68,6 +68,8 @@ class CompetitionTests(unittest.TestCase):
         io.identity.side_effect = RuntimeError('identity failed')
         with self.assertRaises(RuntimeError): run_course(io, 'blue')
         io.carry.assert_not_called();io.sport.assert_not_called();io.dance.assert_not_called()
+        io.left.assert_called_once_with(1)
+        io.right.assert_not_called()
 
     def test_actual_qr_loop_holds_at_candidate(self):
         io = CompetitionIO(self.settings(), Mock(), float('inf'))
@@ -117,6 +119,65 @@ class CompetitionTests(unittest.TestCase):
             self.assertFalse(competition_main.main())
         robot_factory.assert_not_called()
 
+    def test_fixed_moves_wait_for_fresh_observation_after_previous_action(self):
+        for method, action in (('forward', 'UP_LITTLE'), ('right', 'TURN_RIGHT'), ('left', 'TURN_LEFT')):
+            io = CompetitionIO(self.settings(), Mock(), float('inf'))
+            io.ready_at = 2
+            io.observe = Mock(return_value=(None, None, {}))
+            io.move = Mock()
+            with patch('competition_main.time.monotonic', side_effect=[0, 1, 2]):
+                getattr(io, method)(1)
+            self.assertEqual(io.observe.call_count, 3)
+            io.move.assert_called_once_with(action)
+
+    def test_carry_receives_shared_body_connection(self):
+        robot = Mock()
+        io = CompetitionIO(self.settings(), robot, 999)
+        io.close_views = Mock();io.open_views = Mock()
+        with patch('carry_vision.run', return_value=True) as carry:
+            io.carry('blue', io.settings['drop_qr'])
+        carry.assert_called_once_with('blue', io.settings['drop_qr'], actions=True,
+                                      robot=robot, search_right_actions=5, deadline=999,
+                                      qr_reader=competition_main.read_codes)
+        io.close_views.assert_called_once();io.open_views.assert_called_once()
+
+    def test_failure_in_each_task_never_starts_later_tasks(self):
+        tasks = ['identity', 'carry', 'sport', 'enter_blue', 'dance']
+        for index, task in enumerate(tasks):
+            io = Mock();io.settings = self.settings()
+            getattr(io, task).side_effect = RuntimeError('task failed')
+            with self.assertRaises(RuntimeError): run_course(io, 'blue')
+            for later in tasks[index+1:]:
+                getattr(io, later).assert_not_called()
+
+    def test_complete_route_uses_exact_markers_color_return_and_one_dance(self):
+        for color, count in [('red', 2), ('blue', 3), ('yellow', 5)]:
+            io = Mock();io.settings = self.settings()
+            io.settings['return_right_actions'][color] = count
+            self.assertTrue(run_course(io, color))
+            self.assertEqual([call.args for call in io.scan_until.call_args_list],
+                             [('face', 'belly'), ('sber', 'belly'),
+                              ('action1', 'belly'), ('dance', 'head')])
+            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 4, 4, count, 7])
+            io.left.assert_called_once_with(1)
+            self.assertEqual([call.args[0] for call in io.forward.call_args_list], [1, 3, 1])
+            calls = [call[0] for call in io.method_calls]
+            carry_index = calls.index('carry')
+            self.assertEqual(calls[carry_index-2:carry_index], ['forward', 'phase'])
+            io.carry.assert_called_once_with(color, io.settings['drop_qr'])
+            io.dance.assert_called_once()
+
+    def test_face_turns_are_single_turn_actions_around_identity(self):
+        from robotmove import ACTIONS
+        self.assertEqual(ACTIONS['TURN_LEFT'],('左转.dzz',1))
+        self.assertEqual(ACTIONS['TURN_RIGHT'],('右转.dzz',1))
+        io = Mock();io.settings = self.settings()
+        run_course(io,'blue')
+        calls = [call for call in io.method_calls if call[0] != 'phase']
+        self.assertEqual([call[0] for call in calls[:5]],
+                         ['scan_until','left','identity','right','scan_until'])
+        io.forward.assert_any_call(io.settings['factory_entry_forward_steps'])
+
     def test_time_guard_rejects_motion_before_sending(self):
         robot = Mock()
         with patch('time.monotonic', return_value=100):
@@ -138,6 +199,39 @@ class CompetitionTests(unittest.TestCase):
         self.assertEqual(choose_face([right, left]), right)
         self.assertIsNone(choose_face([]))
 
+    def test_identity_matches_standalone_intervals_and_clears_cache_on_lost_face(self):
+        root = competition_main.legacy_root(self.settings())
+        source = load_source(root, 'app/face_main.py', 'test_identity_intervals')
+        frame = np.zeros((480,640,3),np.uint8)
+        detector, gender, ocr = Mock(), Mock(), Mock()
+        detector.detect.return_value = [(100,100,80,80,.9)]
+        gender.classify.return_value = ('female', .9)
+        ocr.read_name.side_effect = [('李娜', .9), ('王芳', .95), ('李娜', .9)]
+        state = dict(frame_index=0, name=None, name_score=None,
+                     gender_label=None, gender_score=0.0)
+        results = [infer_identity(frame,detector,gender,ocr,source,state)[0] for _ in range(4)]
+        self.assertEqual(results,['李娜','李娜','李娜','王芳'])
+        self.assertEqual(detector.detect.call_count,4)
+        self.assertEqual(gender.classify.call_count,2)
+        self.assertEqual(ocr.read_name.call_count,2)
+        detector.detect.return_value = []
+        self.assertIsNone(infer_identity(frame,detector,gender,ocr,source,state)[0])
+        self.assertIsNone(state['name'])
+        detector.detect.return_value = [(100,100,80,80,.9)]
+        self.assertEqual(infer_identity(frame,detector,gender,ocr,source,state)[0],'李娜')
+        self.assertEqual(ocr.read_name.call_count,3)
+
+    def test_competition_face_head_is_124_and_dance_head_remains_120(self):
+        self.assertEqual(self.settings()['face_head_position'],124)
+        self.assertEqual(self.settings()['dance_head_position'],120)
+
+    def test_voice_face_task_uses_current_identity_entry(self):
+        import face_main
+        import voice_main
+        with patch.object(face_main,'recognize',return_value=True) as recognize:
+            self.assertTrue(voice_main._run_face(None))
+        recognize.assert_called_once_with(competition_main.legacy_root(self.settings()),124,60)
+
     def check_colleague_identity(self, missing_frame=False):
         root = competition_main.legacy_root(self.settings())
         eye, head, detector, gender, ocr = Mock(), Mock(), Mock(), Mock(), Mock()
@@ -158,11 +252,11 @@ class CompetitionTests(unittest.TestCase):
              patch('robot_audio.configure') as configure, \
              patch.object(cv2, 'imshow'), patch.object(cv2, 'destroyAllWindows'), \
              patch.object(cv2, 'waitKey', return_value=-1):
-            self.assertTrue(recognize(root, 120, 5))
-        head.turn_vertical.assert_called_once_with(120)
+            self.assertTrue(recognize(root, 124, 5))
+        head.turn_vertical.assert_called_once_with(124)
         configure.assert_called_once_with(volume=127)
         speech.assert_called_once_with('李晓明，女性')
-        count = 4 if missing_frame else 3
+        count = 2 if missing_frame else 1
         self.assertEqual(gender.classify.call_count, count)
         self.assertEqual(ocr.read_name.call_count, count)
         self.assertEqual(ocr.read_name.call_args.args[1], (520, 350, 80, 80))
@@ -274,6 +368,32 @@ class CompetitionTests(unittest.TestCase):
         self.assertEqual((codes[0][1].x, codes[0][1].y), (10, 20))
         decoder.assert_called_once()
 
+    def test_qr_enhancement_restores_coordinates_and_preserves_payload(self):
+        from competition_qr import read_codes
+        payload = self.settings()['drop_qr']
+        code = types.SimpleNamespace(data=payload.encode(),rect=(20,40,60,80))
+        for misses in (1,2):
+            with self.subTest(misses=misses):
+                decoder = Mock(side_effect=[[]]*misses+[[code]])
+                module = types.SimpleNamespace(decode=decoder,ZBarSymbol=types.SimpleNamespace(QRCODE='QR'))
+                with patch.dict('sys.modules',{'pyzbar':types.ModuleType('pyzbar'),'pyzbar.pyzbar':module}):
+                    codes = read_codes(np.zeros((100,100,3),np.uint8))
+                self.assertEqual(codes[0][0],payload)
+                box = codes[0][1]
+                self.assertEqual((box.x,box.y,box.width,box.height),(10,20,30,40))
+                self.assertEqual(decoder.call_count,misses+1)
+                image = decoder.call_args.args[0]
+                self.assertEqual(image.shape,(200,200))
+                if misses == 2: self.assertTrue(np.isin(image,[0,255]).all())
+
+    def test_qr_enhancement_does_not_invent_payload_when_all_attempts_fail(self):
+        from competition_qr import read_codes
+        decoder = Mock(return_value=[])
+        module = types.SimpleNamespace(decode=decoder,ZBarSymbol=types.SimpleNamespace(QRCODE='QR'))
+        with patch.dict('sys.modules',{'pyzbar':types.ModuleType('pyzbar'),'pyzbar.pyzbar':module}):
+            self.assertEqual(read_codes(np.zeros((100,100,3),np.uint8)),[])
+        self.assertEqual(decoder.call_count,3)
+
     def test_shared_carry_search_turns_once_without_new_connection(self):
         import carry_vision
         from dual_kick import camera_settings
@@ -282,7 +402,7 @@ class CompetitionTests(unittest.TestCase):
         hf = np.zeros((480, 640, 3), np.uint8);bf = hf.copy()
         head.getImage.return_value = (True, hf);belly.getImage.return_value = (True, bf)
         servo.is_moving.return_value = False
-        pickup, drop = Box(256, 240, 64, 48), Box(256, 144, 128, 96)
+        pickup, drop = Box(256, 72, 64, 48), Box(256, 144, 128, 96)
         found_qr = False
         def moved(action):
             nonlocal found_qr

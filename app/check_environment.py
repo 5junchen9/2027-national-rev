@@ -40,7 +40,13 @@ def check():
     for name in ("model-steps-3.onnx", "vocos-22khz-univ.onnx", "lexicon.txt",
                  "tokens.txt", "phone.fst", "date.fst", "number.fst"):
         assert (MODEL_DIR / name).is_file(), f"Missing TTS asset: {name}"
-    assert (ROOT / "assets/models/face/face.eim").is_file()
+    from competition_main import CONFIG_FILE, legacy_root, load_settings
+    identity_root = legacy_root(load_settings(CONFIG_FILE))
+    for asset in ("assets/models/gender/fairface.onnx",
+                  "assets/models/face_detector/opencv_face_detector_uint8.pb",
+                  "assets/models/face_detector/opencv_face_detector.pbtxt",
+                  "hardware/name_ocr.py"):
+        assert (identity_root / asset).is_file(), f"Missing identity asset: {asset}"
     assert (ROOT / "assets/music/dance.mp3").is_file()
     assert (ROOT / "assets/models/asr/vosk-model-small-cn-0.22/am/final.mdl").is_file()
     from voice_control import command_for
