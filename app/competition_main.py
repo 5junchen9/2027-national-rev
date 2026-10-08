@@ -358,7 +358,7 @@ class CompetitionIO:
         if not recognize(legacy_root(self.settings), self.settings["face_head_position"],
                          min(60, self.deadline-time.monotonic()),
                          eye=self.head_eye, head=self.servo):
-            raise RuntimeError("姓名和性别识别未完成，停止比赛")
+            print("姓名和性别未完成，跳过播报并继续下一项。", flush=True)
         self.check_time()
         self.resume_route()
 

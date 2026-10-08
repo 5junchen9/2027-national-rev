@@ -8,6 +8,7 @@ import time
 
 import cv2
 import robot_config  # 当前robot_env的驱动与声音配置；不改同学原文件。
+from identity_tools import read_local_name, tracked_head_position
 
 
 def load_source(root, relative_path, module_name):
@@ -37,6 +38,7 @@ def load_models(root):
         return output
 
     ocr.engine = read_text
+    ocr.read_name = lambda image, face: read_local_name(ocr, image, face)
     return detector, gender, ocr
 
 
@@ -49,6 +51,8 @@ def infer_identity(image, detector, gender, ocr, source, state):
     """对齐单独版的隔帧推理；后台每次仍检测新画面中的人脸。"""
     started = time.monotonic()
     face = choose_face(detector.detect(image))
+    state['face'] = face
+    state['ocr_updated'] = False
     detected = time.monotonic()
     if face is None:
         state.update(frame_index=0, name=None, name_score=None,
@@ -62,6 +66,7 @@ def infer_identity(image, detector, gender, ocr, source, state):
     classified = time.monotonic()
     if state['frame_index'] % source.OCR_INTERVAL == 0:
         state['name'], state['name_score'] = ocr.read_name(image, (x, y, width, height))
+        state['ocr_updated'] = True
     state['frame_index'] += 1
     finished = time.monotonic()
     timings = (detected - started, classified - detected, finished - classified)
@@ -81,7 +86,7 @@ def recognize(root, position, timeout, eye=None, head=None):
 
     # 只借用同学的裁剪、性别名称和播报；不调用其旧头部驱动或五人模型。
     source = load_source(root, "app/face_main.py", "colleague_face")
-    confirm_frames = 1  # 首次得到有效姓名和性别后播报。
+    confirm_frames = 3  # 三次独立OCR一致，缓存结果不重复计数。
     state = dict(frame_index=0, name=None, name_score=None,
                  gender_label=None, gender_score=0.0)
     print(f'[人脸配置] 头位={position}；性别每{source.GENDER_INTERVAL}个有效人脸帧、OCR每{source.OCR_INTERVAL}帧更新；中间复用结果。')
@@ -97,6 +102,8 @@ def recognize(root, position, timeout, eye=None, head=None):
             stack.callback(head.cleanup)
         stack.callback(cv2.destroyAllWindows)
         head.turn_vertical(position)
+        current_position = position
+        last_head_move = time.monotonic()
         eye.discard_frames(1)
         # 先退出线程再释放摄像头和模型，避免仍在推理时关闭资源。
         worker = stack.enter_context(ThreadPoolExecutor(max_workers=1))
@@ -117,9 +124,19 @@ def recognize(root, position, timeout, eye=None, head=None):
                 # 每个新检测帧只消费一次；沿用单独版的隔帧缓存，预览刷新不计数。
                 name, gender_label, gender_score, name_score, timings = pending.result()
                 pending = None
+                new_position = tracked_head_position(current_position, position, state.get('face'), image.shape)
+                if new_position != current_position and time.monotonic()-last_head_move >= .8:
+                    current_position = new_position
+                    head.begin_vertical(current_position, settle_seconds=.4)
+                    last_head_move = time.monotonic()
+                    candidate, count = None, 0
+                    state.update(frame_index=0, name=None, name_score=None)
+                    continue
                 identity = (name, gender_label) if name and gender_label in source.GENDER_CN else None
                 if identity is None:
                     candidate, count = None, 0
+                elif not state.get('ocr_updated'):
+                    pass
                 elif identity == candidate:
                     count += 1
                 else:
@@ -137,7 +154,7 @@ def recognize(root, position, timeout, eye=None, head=None):
                     text = f"{name}，{source.GENDER_CN[gender_label]}"
                     print("[语音]", text)
                     return source.speak_chinese(text)
-            if pending is None:
+            if pending is None and head.is_moving() is not True:
                 # 不排队：模型忙时继续预览；空闲时只提交当前最新帧。
                 # 拷贝在绘字前完成，OCR不会读到预览状态文字。
                 pending = worker.submit(infer_identity, image.copy(), detector, gender, ocr, source, state)
@@ -152,7 +169,7 @@ def recognize(root, position, timeout, eye=None, head=None):
                         cv2.FONT_HERSHEY_SIMPLEX, .6, (0, 255, 0), 2)
             cv2.imshow("competition face", image)
             if cv2.waitKey(1) & 255 in (ord("q"), 27):
-                return False
+                raise KeyboardInterrupt
         print("姓名/性别未连续确认，停止本阶段。")
         return False
 
@@ -160,7 +177,7 @@ def recognize(root, position, timeout, eye=None, head=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--legacy-root", type=Path, required=True)
-    parser.add_argument("--head-position", type=int, default=130)
+    parser.add_argument("--head-position", type=int, default=131)
     parser.add_argument("--timeout", type=float, default=60)
     args = parser.parse_args()
     raise SystemExit(0 if recognize(args.legacy_root.resolve(), args.head_position,

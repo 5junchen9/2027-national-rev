@@ -3,26 +3,42 @@ import cv2
 import numpy as np
 
 
-def detect_line(image, color="white", previous_x=None, band=(.8, 1.0)):
-    height, width = image.shape[:2]
-    top = int(height * band[0])
-    roi = image[top:int(height * band[1])]
+def line_mask(image, color="white"):
+    """先遮掉二维码，再检测细长路线；反光仍需靠形状和位置连续性排除。"""
     if color == "white":
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, (0, 0, 150), (179, 80, 255))
     else:
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         _, mask = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
+    # 只定位二维码，不要求解出内容，避免用left/action1触发路线。
+    found, points = cv2.QRCodeDetector().detectMulti(image)
+    if found:
+        for polygon in points:
+            center = polygon.mean(axis=0)
+            polygon = center + (polygon-center)*1.3
+            cv2.fillConvexPoly(mask, np.round(polygon).astype(np.int32), 0)
+    return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+
+
+def detect_line(image, color="white", previous_x=None, band=(.8, 1.0), mask=None):
+    height, width = image.shape[:2]
+    top = int(height * band[0])
+    if mask is None:
+        mask = line_mask(image, color)
+    roi = mask[top:int(height * band[1])]
+    contours = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
     candidates = []
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
-        if cv2.contourArea(contour) < 50 * width / 640 or w > width * .45:
+        if (cv2.contourArea(contour) < 50 * width / 640 or w > width * .18
+                or h < roi.shape[0]*.55 or h < w*.8):
             continue
         moments = cv2.moments(contour)
         if moments["m00"]:
-            candidates.append(moments["m10"] / moments["m00"])
+            cx = moments["m10"] / moments["m00"]
+            if previous_x is None or abs(cx-previous_x) <= width*.18:
+                candidates.append(cx)
     if not candidates:
         return None
     anchor = width / 2 if previous_x is None else previous_x

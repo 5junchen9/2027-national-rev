@@ -420,8 +420,8 @@ class CompetitionTests(unittest.TestCase):
         frame[0, 0] = [10, 20, 30]
         frame[0, -1] = [40, 50, 60]
         eye.getImage.return_value = (True, frame)
-        face = [(520, 350, 80, 80, .9)]
-        detector.detect.side_effect = [[],face] if missing_frame else [face]
+        face = [(520, 150, 80, 80, .9)]
+        detector.detect.side_effect = lambda image: [] if missing_frame and detector.detect.call_count == 1 else face
         gender.classify.return_value = ('female', .9)
         ocr.read_name.return_value = ('李晓明', .9)
         with patch.dict('sys.modules', {
@@ -436,10 +436,10 @@ class CompetitionTests(unittest.TestCase):
         head.turn_vertical.assert_called_once_with(124)
         configure.assert_called_once_with(volume=127)
         speech.assert_called_once_with('李晓明，女性')
-        self.assertEqual(detector.detect.call_count,2 if missing_frame else 1)
-        self.assertEqual(gender.classify.call_count,1)
-        self.assertEqual(ocr.read_name.call_count,1)
-        self.assertEqual(ocr.read_name.call_args.args[1], (520, 350, 80, 80))
+        self.assertEqual(detector.detect.call_count,8 if missing_frame else 7)
+        self.assertEqual(gender.classify.call_count,3)
+        self.assertEqual(ocr.read_name.call_count,3)
+        self.assertEqual(ocr.read_name.call_args.args[1], (520, 150, 80, 80))
         np.testing.assert_array_equal(detector.detect.call_args.args[0][0, 0], [40, 50, 60])
         np.testing.assert_array_equal(ocr.read_name.call_args.args[0][0, 0], [40, 50, 60])
         np.testing.assert_array_equal(frame[0, 0], [10, 20, 30])
@@ -527,7 +527,8 @@ class CompetitionTests(unittest.TestCase):
              patch('robot_audio.configure'), patch.object(cv2, 'imshow', side_effect=show), \
              patch.object(cv2, 'destroyAllWindows'), \
              patch.object(cv2, 'waitKey', side_effect=lambda delay: ord('q') if release.is_set() else -1):
-            self.assertFalse(recognize(root, 120, 5))
+            with self.assertRaises(KeyboardInterrupt):
+                recognize(root, 120, 5)
         self.assertGreaterEqual(preview_count, 8)
         # 多次预览既没有排队提交推理，也没有把一个结果重复确认并播报。
         detector.detect.assert_called_once()
@@ -548,7 +549,7 @@ class CompetitionTests(unittest.TestCase):
             detector, gender, ocr = load_models(root)
         image = np.zeros((480, 640, 3), np.uint8)
         self.assertEqual(ocr.read_name(image, (100, 100, 100, 100)), (None, None))
-        self.assertEqual(engine.call_count, 2)  # 下方无字后，整帧也检查一次。
+        self.assertEqual(engine.call_count, 1)  # 只检查放大的姓名区域，不回退整帧。
 
     def test_colleague_detector_searches_right_half_and_rejects_low_confidence(self):
         root = competition_main.legacy_root(self.settings())

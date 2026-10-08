@@ -13,7 +13,7 @@ from competition_main import (CompetitionIO, GuardedRobot, BODY_PORT, CONFIG_FIL
 from carry_vision import steering, find_blocks
 from kick_shapes import overlap
 from dual_kick import camera_settings
-from line_search_route import detect_line, LinePlanner, run_course
+from line_search_route import detect_line, line_mask, LinePlanner, run_course
 
 
 class LineCompetitionIO(CompetitionIO):
@@ -44,12 +44,14 @@ class LineCompetitionIO(CompetitionIO):
                 continue
             block_frames = 0
             previous_block = None
-            x = detect_line(belly, self.line_color, planner.previous_x)
+            mask = line_mask(belly, self.line_color)
+            x = detect_line(belly, self.line_color, planner.previous_x, mask=mask)
             # 连续两幅新画面没线后才开始局部搜索。
             if x is None:
                 _, belly, _ = self.observe_ready()
-                x = detect_line(belly, self.line_color, planner.previous_x)
-            far_x = detect_line(belly, self.line_color, x, band=(.55, .75))
+                mask = line_mask(belly, self.line_color)
+                x = detect_line(belly, self.line_color, planner.previous_x, mask=mask)
+            far_x = detect_line(belly, self.line_color, x, band=(.55, .75), mask=mask)
             flip = camera_settings()["belly"]["flip"]
             action = planner.decide(x, belly.shape[1], far_x, mirrored=flip in ("1", "-1"))
             display = belly.copy()
@@ -78,8 +80,9 @@ def preview_line(settings, line_color):
         print("仅预览线路，不连接身体串口；Q退出。")
         while True:
             _, belly, _ = io.observe()
-            x = detect_line(belly, line_color, planner.previous_x)
-            far_x = detect_line(belly, line_color, x, band=(.55, .75))
+            mask = line_mask(belly, line_color)
+            x = detect_line(belly, line_color, planner.previous_x, mask=mask)
+            far_x = detect_line(belly, line_color, x, band=(.55, .75), mask=mask)
             if x is not None:
                 planner.previous_x = x
             display = belly.copy()
