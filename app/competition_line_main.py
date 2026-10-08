@@ -10,7 +10,7 @@ import cv2
 from robot_config import ROOT
 from competition_main import (CompetitionIO, GuardedRobot, BODY_PORT, CONFIG_FILE,
                               load_settings, preflight)
-from carry_vision import steering, find_blocks
+from carry_vision import steering, find_blocks, BlockTracker
 from kick_shapes import overlap
 from dual_kick import camera_settings
 from line_search_route import detect_line, line_mask, LinePlanner, run_course
@@ -26,13 +26,14 @@ class LineCompetitionIO(CompetitionIO):
         self.set_head(127)
         block_frames = 0
         previous_block = None
+        block_tracker = BlockTracker(recover_head=True)
         deadline = min(self.deadline, time.monotonic() + self.settings["route_timeout_seconds"])
         for _ in range(self.settings["route_max_steps"]):
             head, belly, _ = self.observe_ready()
             if time.monotonic() >= deadline:
                 raise RuntimeError("寻线超时，停止比赛")
             blocks = find_blocks(head, color)
-            block = max(blocks, key=lambda box: box.width * box.height) if blocks else None
+            block = block_tracker.update(blocks,frame=head,color=color)
             if block is not None:
                 same_block = previous_block is not None and overlap(previous_block, block) > .3
                 block_frames = block_frames + 1 if same_block else 1

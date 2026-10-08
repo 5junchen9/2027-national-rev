@@ -1,6 +1,7 @@
 """复用zbar解码；只返回完整二维码文本和原始图像位置。"""
 import cv2
 from kick_shapes import Box
+from qr_geometry import qr_box, QRBox
 
 
 def qr_images(frame):
@@ -26,6 +27,12 @@ def read_codes(frame):
             if text:
                 # 放大图上的框必须还原，否则会错误判断方向和放下位置。
                 x,y,w,h = code.rect
-                codes.append((text,Box(x/scale,y/scale,w/scale,h/scale)))
+                polygon = [(point.x/scale,point.y/scale) for point in code.polygon]
+                box = Box(x/scale,y/scale,w/scale,h/scale)
+                if len(polygon)>=4:
+                    geometry = qr_box(polygon)
+                    if isinstance(geometry,QRBox):
+                        box = QRBox(box.x,box.y,box.width,box.height,geometry.corners)
+                codes.append((text,box))
         if codes: return codes
     return []

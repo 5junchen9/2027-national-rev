@@ -162,8 +162,7 @@ class CameraTests(unittest.TestCase):
             eye.close()
             usb.assert_called_once()
             csi.assert_not_called()
-            self.assertFalse(any(call.args[0] == roboteye.cv2.CAP_PROP_FOURCC
-                                 for call in camera.set.call_args_list))
+            camera.set.assert_any_call(roboteye.cv2.CAP_PROP_FOURCC, roboteye.cv2.VideoWriter_fourcc(*"MJPG"))
             camera.set.assert_any_call(roboteye.cv2.CAP_PROP_BUFFERSIZE,4)
 
     def test_warmup_exception_releases_camera(self):

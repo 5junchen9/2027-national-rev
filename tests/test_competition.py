@@ -583,7 +583,7 @@ class CompetitionTests(unittest.TestCase):
     def test_wechat_url_is_kept_as_exact_text_without_network_execution(self):
         from competition_qr import read_codes
         payload = self.settings()['drop_qr']
-        decoder = Mock(return_value=[types.SimpleNamespace(data=payload.encode(), rect=(10, 20, 30, 40))])
+        decoder = Mock(return_value=[types.SimpleNamespace(data=payload.encode(), rect=(10, 20, 30, 40), polygon=[] )])
         module = types.SimpleNamespace(decode=decoder, ZBarSymbol=types.SimpleNamespace(QRCODE='QR'))
         with patch.dict('sys.modules', {'pyzbar': types.ModuleType('pyzbar'), 'pyzbar.pyzbar': module}):
             codes = read_codes(np.zeros((100, 100, 3), np.uint8))
@@ -594,7 +594,7 @@ class CompetitionTests(unittest.TestCase):
     def test_qr_enhancement_restores_coordinates_and_preserves_payload(self):
         from competition_qr import read_codes
         payload = self.settings()['drop_qr']
-        code = types.SimpleNamespace(data=payload.encode(),rect=(20,40,60,80))
+        code = types.SimpleNamespace(data=payload.encode(),rect=(20,40,60,80), polygon=[])
         for misses in (1,2):
             with self.subTest(misses=misses):
                 decoder = Mock(side_effect=[[]]*misses+[[code]])

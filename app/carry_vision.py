@@ -13,6 +13,8 @@ from dual_kick import camera_settings
 from kick_shapes import Box, overlap
 from handover_debug import Handover
 from ball_debug import distinct_from_background
+from blue_block_edges import edge_blue_boxes, supported_blue_boundary
+from qr_geometry import qr_box, view_matches, quad_size_ratios
 
 INITIAL_HEAD_POSITION = 127
 DELIVERY_HEAD_POSITION = 133
@@ -104,6 +106,13 @@ def find_blocks(frame, color, near=False):
         min_corners = 3 if clipped else 4
         if min_corners <= len(polygon) <= 6 and area/cv2.contourArea(hull) >= .65:
             blocks.append(Box(x,y,w,h))
+    if color == 'blue':
+        # 完整盒面增加独立边缘要求；近处截断目标仍由原有近处跟踪控制。
+        if not near:
+            blocks = [box for box in blocks if box.x<=5 or box.y<=2
+                      or box.x+box.width>=width-5 or box.bottom>=height-2
+                      or supported_blue_boundary(frame,box)]
+        blocks.extend(edge_blue_boxes(frame))
     return remove_nested_boxes(blocks)
 
 
@@ -131,8 +140,7 @@ def read_qr_codes(frame, detector):
     for content,corners in zip(contents,points):
         if not content:
             continue
-        x,y,w,h = cv2.boundingRect(corners.astype(np.float32))
-        codes.append((content,Box(x,y,w,h)))
+        codes.append((content,qr_box(corners)))
     return codes
 
 
@@ -515,6 +523,8 @@ def reference_for_target(reference, target_qr):
         reference.pop('drop_head_position',None)
         reference.pop('drop_camera',None)
         reference.pop('drop_head',None)
+        reference.pop('drop_quad',None)
+        reference.pop('drop_head_quad',None)
         reference['target_qr'] = target_qr
     return reference
 
@@ -604,12 +614,24 @@ class CarryPlanner:
                 self.reason = 'uncalibrated camera: turn only'
                 return self.confirm_action(action,stable_frames)
             else:
-                return self.decide_placement(box,stable_frames,target,decoded)
+                if not view_matches(box,self.reference,camera):
+                    dx = box.cx-target.cx
+                    if decoded and abs(dx) > .12:
+                        action = steering('LEFT_HOLDBOX' if dx < 0 else 'RIGHT_HOLDBOX',self.flip)
+                        self.reason = 'center QR before comparing placement perspective'
+                        return self.confirm_action(action,stable_frames)
+                    self.reset_confirmation()
+                    self.reason = 'QR perspective differs from calibrated placement; hold body'
+                    return 'WAIT'
+                return self.decide_placement(box,stable_frames,target,decoded,
+                                             quad_size_ratios(box,self.reference,camera))
         return self.confirm_action(action,stable_frames)
 
-    def decide_placement(self, box, stable_frames, target, decoded):
+    def decide_placement(self, box, stable_frames, target, decoded, side_ratios=None):
         width_ratio = box.width/target.width
         height_ratio = box.height/target.height
+        if side_ratios is not None:
+            width_ratio,height_ratio = side_ratios
         dx = box.cx-target.cx
         tolerance = .16 if self.delivery_aligned else .12
         near = min(width_ratio,height_ratio)+1e-6 >= DROP_SIZE_MIN
@@ -820,6 +842,8 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                     for content,box in codes_by_camera[name]:
                         cv2.rectangle(display,(int(box.x),int(box.y)),(int(box.x+box.width),int(box.bottom)),(255,255,0),2)
                         cv2.putText(display,content,(int(box.x),max(15,int(box.y)-5)),0,.5,(255,255,0),1)
+                        if hasattr(box,'corners'):
+                            cv2.polylines(display,[np.asarray(box.corners,np.int32)],True,(255,0,255),2)
                 phase = planner.phase if actions else 'PREVIEW'
                 reason = planner.reason if actions else 'H=pickup; D=belly drop; J=head133 drop; Q=quit'
                 cv2.putText(display,f'{phase} {handover.phase} color={color} head={handover.angle}',(8,25),0,.5,(255,255,255),1)
@@ -900,9 +924,15 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                 if key == ord('d'):
                     reference['drop_camera'] = 'belly'
                     reference['drop'] = [normalized.x,normalized.y,normalized.width,normalized.height]
+                    reference.pop('drop_quad',None)
+                    if hasattr(normalized,'corners'):
+                        reference['drop_quad'] = normalized.corners
                 if key == ord('j'):
                     reference['drop_head_position'] = DELIVERY_HEAD_POSITION
                     reference['drop_head'] = [normalized.x,normalized.y,normalized.width,normalized.height]
+                    reference.pop('drop_head_quad',None)
+                    if hasattr(normalized,'corners'):
+                        reference['drop_head_quad'] = normalized.corners
                 if key == ord('h'):
                     reference['pickup'] = [normalized.x,normalized.y,normalized.width,normalized.height]
                     reference['pickup_mode'] = 'visible_region'

@@ -78,7 +78,8 @@ class LineTests(unittest.TestCase):
     @patch('competition_line_main.cv2.imshow')
     def test_same_color_block_confirms_before_any_search_motion(self, show):
         io=self.make_io()
-        with patch('competition_line_main.find_blocks',return_value=[Box(100,100,60,60)]):
+        with patch('competition_line_main.BlockTracker') as tracker:
+            tracker.return_value.update.return_value=Box(100,100,60,60)
             io.follow_to_carry('red')
         io.move.assert_not_called()
         self.assertEqual(io.observe_ready.call_count,3)
@@ -88,7 +89,8 @@ class LineTests(unittest.TestCase):
     def test_different_blocks_do_not_accumulate_confirmation(self, show):
         io=self.make_io()
         boxes=[[Box(10 if i%2 else 200,100,60,60)] for i in range(30)]
-        with patch('competition_line_main.find_blocks',side_effect=boxes):
+        with patch('competition_line_main.BlockTracker') as tracker:
+            tracker.return_value.update.side_effect=[items[0] for items in boxes]
             with self.assertRaisesRegex(RuntimeError,'动作上限'):
                 io.follow_to_carry('red')
         io.move.assert_not_called()
