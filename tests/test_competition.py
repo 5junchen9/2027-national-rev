@@ -17,6 +17,46 @@ from competition_identity import choose_face, recognize, load_source, load_model
 
 
 class CompetitionTests(unittest.TestCase):
+    def test_line_detection_rejects_floor_and_center_and_tracks_offset(self):
+        from route_line import correction_action
+        for width, height in ((640,480),(320,240)):
+            frame = np.full((height,width,3),255,np.uint8)
+            self.assertIsNone(correction_action(frame))
+            for fraction, expected in ((.5,None),(.38,'SIDE_LEFT'),(.75,'TURN_RIGHT')):
+                image = frame.copy()
+                x = round(width*fraction)
+                cv2.rectangle(image,(x-4,0),(x+4,height-1),(0,0,0),-1)
+                self.assertEqual(correction_action(image),expected)
+            self.assertIsNone(correction_action(np.zeros_like(frame)))
+
+    def test_route_checks_line_once_every_three_forward_steps(self):
+        io = CompetitionIO(self.settings(),Mock(),float('inf'))
+        io.open_views = Mock();io.ready_at = 0
+        io.observe = Mock(side_effect=[(None,None,{'belly':[]})]*8 +
+                          [(None,None,{'belly':[('face',None)]})]*3)
+        io.move = Mock()
+        io.correct_line = Mock(return_value=True)
+        io.scan_until('face','belly')
+        self.assertEqual(io.correct_line.call_count,2)
+        self.assertEqual(io.move.call_count,6)
+
+    def test_line_correction_requires_agreement_and_yields_to_qr(self):
+        io = CompetitionIO(self.settings(),Mock(),float('inf'))
+        io.move = Mock();io.observe = Mock(return_value=(None,None,{'belly':[]}))
+        with patch('competition_main.correction_action',side_effect=['TURN_LEFT',None]):
+            self.assertFalse(io.correct_line(None,'belly'))
+        io.move.assert_not_called()
+        io.stream = Mock();io.stream.saw_candidate.return_value=True
+        with patch('competition_main.correction_action',return_value='TURN_LEFT'):
+            self.assertTrue(io.correct_line(None,'belly'))
+        io.move.assert_not_called()
+        io.stream.saw_candidate.return_value=False
+        with patch('competition_main.correction_action',return_value='TURN_LEFT'), \
+             patch('competition_main.camera_settings',return_value={'belly':{'flip':'none'}}):
+            self.assertTrue(io.correct_line(None,'belly'))
+        io.move.assert_called_once_with('TURN_LEFT')
+        self.assertFalse(io.correct_line(None,'head'))
+
     def test_route_waits_while_decoding_then_walks_after_empty_result(self):
         io=CompetitionIO(self.settings(),Mock(),float('inf'))
         io.open_views=Mock();io.ready_at=0
@@ -98,6 +138,33 @@ class CompetitionTests(unittest.TestCase):
         self.assertEqual([entry.update(ratios) for _ in range(3)], [False, False, True])
         self.assertFalse(entry.update([1, 0]))
 
+    def test_face_qr_then_one_back_step_then_right_identity_left(self):
+        io=Mock();io.settings=self.settings()
+        run_course(io,'red')
+        actions=[(call[0],call.args) for call in io.method_calls if call[0] != 'phase']
+        self.assertEqual(actions[:7],[('scan_until',('face','belly')),('backward',(1,)),
+                                     ('right',(1,)),('squat',()),('identity',()),
+                                     ('stand',()),('left',(1,))])
+        io.backward.assert_called_once_with(1)
+
+    def test_face_postures_observe_before_sending_action(self):
+        io=CompetitionIO(self.settings(),Mock(),float('inf'))
+        io.observe_ready=Mock()
+        io.move=Mock()
+        io.squat()
+        io.stand()
+        self.assertEqual(io.observe_ready.call_count,2)
+        self.assertEqual([call.args[0] for call in io.move.call_args_list],['SQUAT','STAND'])
+
+    def test_backward_observes_each_step_and_stops_if_next_observation_fails(self):
+        io=CompetitionIO(self.settings(),Mock(),float('inf'))
+        io.observe_ready=Mock(side_effect=[None,RuntimeError('camera failed')])
+        io.move=Mock()
+        with self.assertRaisesRegex(RuntimeError,'camera failed'):
+            io.backward(2)
+        io.move.assert_called_once_with('BACK')
+        self.assertEqual(io.observe_ready.call_count,2)
+
     def test_same_course_order_for_each_field_color(self):
         for color in ('red', 'blue', 'yellow'):
             io = Mock()
@@ -120,6 +187,8 @@ class CompetitionTests(unittest.TestCase):
         io.carry.assert_not_called();io.sport.assert_not_called();io.dance.assert_not_called()
         io.right.assert_called_once_with(1)
         io.left.assert_not_called()
+        io.squat.assert_called_once()
+        io.stand.assert_not_called()
 
     def test_actual_qr_loop_holds_at_candidate(self):
         io = CompetitionIO(self.settings(), Mock(), float('inf'))
@@ -237,7 +306,7 @@ class CompetitionTests(unittest.TestCase):
         with patch('carry_vision.run', return_value=True) as carry:
             io.carry('blue', io.settings['drop_qr'])
         carry.assert_called_once_with('blue', io.settings['drop_qr'], actions=True,
-                                      robot=robot, search_right_actions=5, deadline=999,
+                                      robot=robot, search_right_actions=5, deadline=999, delivery_right_actions=1,
                                       qr_reader=competition_main.read_codes, use_original_drop=False,
                                       eyes=(io.head_eye,io.belly_eye),servo=io.servo)
         io.stop_route.assert_called_once();io.resume_route.assert_called_once()
@@ -266,7 +335,7 @@ class CompetitionTests(unittest.TestCase):
             self.assertEqual([call.args for call in io.scan_until.call_args_list],
                              [('face', 'belly'), ('left', 'belly'),
                               ('action1', 'belly'), ('dance', 'head')])
-            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 3, 4, 7])
+            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 3, 3, 7])
             io.left.assert_called_once_with(1)
             self.assertEqual([call.args[0] for call in io.forward.call_args_list], [])
             calls = [call[0] for call in io.method_calls]
@@ -286,8 +355,8 @@ class CompetitionTests(unittest.TestCase):
         io = Mock();io.settings = self.settings()
         run_course(io,'blue')
         calls = [call for call in io.method_calls if call[0] != 'phase']
-        self.assertEqual([call[0] for call in calls[:5]],
-                         ['scan_until','right','identity','left','scan_until'])
+        self.assertEqual([call[0] for call in calls[:8]],
+                         ['scan_until','backward','right','squat','identity','stand','left','scan_until'])
 
     def test_time_guard_rejects_motion_before_sending(self):
         robot = Mock()
@@ -332,8 +401,8 @@ class CompetitionTests(unittest.TestCase):
         self.assertEqual(infer_identity(frame,detector,gender,ocr,source,state)[0],'李娜')
         self.assertEqual(ocr.read_name.call_count,3)
 
-    def test_competition_face_head_is_124_and_dance_head_remains_120(self):
-        self.assertEqual(self.settings()['face_head_position'],124)
+    def test_competition_face_head_is_131_and_dance_head_remains_120(self):
+        self.assertEqual(self.settings()['face_head_position'],131)
         self.assertEqual(self.settings()['dance_head_position'],120)
 
     def test_voice_face_task_uses_current_identity_entry(self):
@@ -341,7 +410,7 @@ class CompetitionTests(unittest.TestCase):
         import voice_main
         with patch.object(face_main,'recognize',return_value=True) as recognize:
             self.assertTrue(voice_main._run_face(None))
-        recognize.assert_called_once_with(competition_main.legacy_root(self.settings()),124,60)
+        recognize.assert_called_once_with(competition_main.legacy_root(self.settings()),131,60)
 
     def check_colleague_identity(self, missing_frame=False, shared=False):
         root = competition_main.legacy_root(self.settings())
@@ -358,7 +427,7 @@ class CompetitionTests(unittest.TestCase):
         with patch.dict('sys.modules', {
             'Head': types.SimpleNamespace(RobotHeadServoOnly=lambda **kw: head),
             'roboteye': types.SimpleNamespace(RobotEye=lambda **kw: eye),
-            'chinese_speech': types.SimpleNamespace(speak_chinese=speech)}), \
+            'chinese_speech': types.SimpleNamespace(speak_chinese=speech, warm_up=Mock())}), \
              patch('competition_identity.load_models', return_value=(detector, gender, ocr)), \
              patch('robot_audio.configure') as configure, \
              patch.object(cv2, 'imshow'), patch.object(cv2, 'destroyAllWindows'), \
@@ -402,7 +471,7 @@ class CompetitionTests(unittest.TestCase):
             for method in (io.identity,lambda:io.carry('blue',io.settings['drop_qr']),io.sport):
                 method()
                 head.close.assert_not_called();belly.close.assert_not_called();servo.cleanup.assert_not_called()
-            face.assert_called_once_with(competition_main.legacy_root(io.settings),124,60,eye=head,head=servo)
+            face.assert_called_once_with(competition_main.legacy_root(io.settings),131,60,eye=head,head=servo)
             for stage in (carry,sport):
                 self.assertEqual(stage.call_args.kwargs['eyes'],(head,belly))
                 self.assertIs(stage.call_args.kwargs['servo'],servo)
@@ -453,7 +522,7 @@ class CompetitionTests(unittest.TestCase):
         with patch.dict('sys.modules', {
             'Head': types.SimpleNamespace(RobotHeadServoOnly=lambda **kw: head),
             'roboteye': types.SimpleNamespace(RobotEye=lambda **kw: eye),
-            'chinese_speech': types.SimpleNamespace(speak_chinese=speech)}), \
+            'chinese_speech': types.SimpleNamespace(speak_chinese=speech, warm_up=Mock())}), \
              patch('competition_identity.load_models', return_value=(detector, gender, ocr)), \
              patch('robot_audio.configure'), patch.object(cv2, 'imshow', side_effect=show), \
              patch.object(cv2, 'destroyAllWindows'), \
@@ -563,7 +632,7 @@ class CompetitionTests(unittest.TestCase):
         robot.robotMove.side_effect = moved
         reference = dict(version=2, cameras=camera_settings(), head_position=129,
                          target_qr='action2', shapes=dict(head=[480, 640], belly=[480, 640]),
-                         pickup=[.4, .5, .1, .1], drop=[.4, .3, .2, .2], drop_head_position=125)
+                         pickup=[.4, .5, .1, .1], drop=[.4, .3, .2, .2], drop_camera='belly')
         factory = Mock()
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'carry.json';path.write_text(json.dumps(reference))
@@ -577,7 +646,7 @@ class CompetitionTests(unittest.TestCase):
                  patch.object(cv2, 'imshow'), patch.object(cv2, 'destroyAllWindows'), \
                  patch.object(cv2, 'waitKey', return_value=-1), \
                  patch('time.monotonic', side_effect=iter(i*.1 for i in range(2000))):
-                self.assertTrue(carry_vision.run('blue', 'action2', actions=True, robot=robot,
+                self.assertTrue(carry_vision.run('blue', 'action2', actions=True, robot=robot, delivery_right_actions=0,
                                                 search_right_actions=2, deadline=999,
                                                 eyes=(head,belly) if shared else None,
                                                 servo=servo if shared else None))

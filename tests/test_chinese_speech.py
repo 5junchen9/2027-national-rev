@@ -13,6 +13,18 @@ import chinese_speech as speech
 
 
 class ChineseSpeechTests(unittest.TestCase):
+    def test_warm_up_reuses_model_and_never_plays_audio(self):
+        speech.warm_up.cache_clear()
+        try:
+            with patch.object(speech,'load_tts') as load, patch.object(speech,'play_audio') as play:
+                speech.warm_up()
+                speech.warm_up()
+                load.assert_called_once()
+                load.return_value.generate.assert_called_once_with('你好',sid=0,speed=1.0)
+                play.assert_not_called()
+        finally:
+            speech.warm_up.cache_clear()
+
     def test_face_volume_override_sets_speakers_and_enables_audio_route(self):
         import robot_audio
         with patch.object(robot_audio.subprocess, "run") as run:
@@ -103,7 +115,7 @@ class ChineseSpeechTests(unittest.TestCase):
         settings = load_settings(CONFIG_FILE)
         with patch.object(face_main, "recognize", return_value=False) as recognize:
             self.assertFalse(face_main.run())
-        recognize.assert_called_once_with(legacy_root(settings),124,60)
+        recognize.assert_called_once_with(legacy_root(settings),130,60)
 
 
 if __name__ == "__main__":

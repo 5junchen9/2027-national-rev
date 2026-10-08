@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import wave
 
 
@@ -41,6 +42,16 @@ def load_tts():
     if not config.validate():
         raise RuntimeError("中文女声模型配置无效，请检查模型目录")
     return sherpa_onnx.OfflineTts(config)
+
+
+@lru_cache(maxsize=1)
+def warm_up():
+    """提前加载并做一次无声合成；同一进程只执行一次，不播放提示音。"""
+    started = time.monotonic()
+    tts = load_tts()
+    loaded = time.monotonic()
+    tts.generate("你好", sid=0, speed=1.0)
+    print(f"[语音预热] 模型加载={loaded-started:.2f}s，首次合成={time.monotonic()-loaded:.2f}s", flush=True)
 
 
 def synthesize(text, output):
@@ -85,7 +96,9 @@ def speak_chinese(text, audio_path=None):
                 print("[语音] 录音播放失败，尝试普通话合成：{}".format(error))
         with tempfile.TemporaryDirectory(prefix="robot-chinese-") as directory:
             output = Path(directory) / "speech.wav"
+            started = time.monotonic()
             voice = synthesize(text, output)
+            print(f"[语音] 合成耗时={time.monotonic()-started:.2f}s，开始播放", flush=True)
             print("[语音] 普通话音库：{}".format(voice))
             play_audio(output)
         return True

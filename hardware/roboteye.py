@@ -1,5 +1,6 @@
 import datetime
 import os
+from pathlib import Path
 from robot_config import ROOT
 import time
 import threading
@@ -17,6 +18,20 @@ if CAMERA_BACKEND not in ("csi", "usb") or CAMERA_FLIP not in ("none", "-1", "0"
 
 def camera_source():
     return int(CAMERA_DEVICE) if CAMERA_DEVICE.isdigit() else CAMERA_DEVICE
+
+
+def usb_camera_source(device):
+    """保留配置中的设备身份，只把实际打开方式转换为已存在节点的编号。"""
+    if device.isdigit():
+        return int(device)
+    path = Path(device)
+    if path.is_absolute() and path.exists():
+        target = path.resolve()
+        number = target.name.removeprefix('video')
+        if target.parent == Path('/dev') and target.name.startswith('video') and number.isdigit():
+            print(f'USB camera source: {device} -> {target} (index={number})', flush=True)
+            return int(number)
+    return device  # 不猜其他节点；错误路径仍按原路径报错。
 
 
 class _CsiCamera:
@@ -161,7 +176,10 @@ class RobotEye:
         if self.__camera is not None:
             self.__camera.release()
             self.__camera = None
-        source = int(self.device) if self.device.isdigit() else self.device
+        if self.backend == 'usb':
+            source = usb_camera_source(self.device)
+        else:
+            source = int(self.device) if self.device.isdigit() else self.device
         backend = cv2.CAP_V4L2 if os.name == "posix" else cv2.CAP_ANY
 
         for _ in range(2):

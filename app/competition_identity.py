@@ -72,8 +72,10 @@ def recognize(root, position, timeout, eye=None, head=None):
     from Head import RobotHeadServoOnly
     from roboteye import RobotEye
     from robot_audio import configure
+    from chinese_speech import warm_up
 
     # 每次启动设置扬声器最大硬件音量、打开播放通路；不依赖.bashrc。
+    warm_up()  # 独立人脸入口也预热；比赛已预热时直接复用。
     configure(volume=127)
     print("[声音] 扬声器音量已设为127，开始识别姓名和性别。")
 
@@ -158,7 +160,7 @@ def recognize(root, position, timeout, eye=None, head=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--legacy-root", type=Path, required=True)
-    parser.add_argument("--head-position", type=int, default=124)
+    parser.add_argument("--head-position", type=int, default=130)
     parser.add_argument("--timeout", type=float, default=60)
     args = parser.parse_args()
     raise SystemExit(0 if recognize(args.legacy_root.resolve(), args.head_position,

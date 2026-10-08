@@ -14,6 +14,39 @@ from dual_kick import camera_settings
 
 
 class CarryVisionTests(unittest.TestCase):
+    def test_old_head_d_is_rejected_without_changing_reference(self):
+        for position in (125,127):
+            reference = dict(pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2],drop_head_position=position)
+            self.assertIsNone(carry_vision.drop_reference(reference))
+            self.assertEqual(reference['drop_head_position'],position)
+
+    def test_dual_selector_rejects_template_only_and_prefers_calibrated_camera(self):
+        trackers = {name:Mock(source='decoded',frames=5) for name in ('head','belly')}
+        box = Box(100,100,80,80)
+        boxes = dict(head=box,belly=box)
+        matches = dict(head=[box],belly=[box])
+        reference = self.reference()
+        reference.update(drop_head=[.4,.3,.2,.2],drop_head_position=133)
+        self.assertEqual(carry_vision.select_qr_camera(matches,trackers,boxes,reference),'belly')
+        trackers['belly'].source = 'tracked'
+        self.assertEqual(carry_vision.select_qr_camera(matches,trackers,boxes,reference),'head')
+        trackers['head'].source = 'tracked'
+        self.assertIsNone(carry_vision.select_qr_camera(matches,trackers,boxes,reference))
+
+    def test_uncalibrated_head_can_turn_but_cannot_approach_or_release(self):
+        planner = CarryPlanner(self.reference(),'none');planner.phase='DELIVER'
+        for _ in range(4):
+            self.assertEqual(planner.decide(Box(.4,.3,.2,.2),5,camera='head'),'WAIT')
+        self.assertEqual([planner.decide(Box(.1,.3,.1,.1),5,camera='head') for _ in range(2)],
+                         ['WAIT','LEFT_HOLDBOX'])
+
+    def test_133_reference_cannot_reuse_127_head_reference(self):
+        reference = dict(drop_head=[.4,.3,.2,.2],drop_head_position=127)
+        self.assertIsNone(carry_vision.drop_reference(reference,'head'))
+        reference['drop_head_position'] = 133
+        self.assertIsNotNone(carry_vision.drop_reference(reference,'head'))
+        self.assertIsNone(carry_vision.drop_reference(reference,'belly'))
+
     def test_new_destination_reuses_h_but_does_not_reuse_or_overwrite_old_d(self):
         original=dict(target_qr='OLD',**self.reference())
         changed=carry_vision.reference_for_target(original,'action2')
@@ -22,16 +55,10 @@ class CarryVisionTests(unittest.TestCase):
         self.assertIsNone(carry_vision.drop_reference(changed))
         self.assertIsNotNone(carry_vision.drop_reference(original))
         self.assertEqual(original['target_qr'],'OLD')
-    def test_original_h_trial_approaches_and_requires_exact_decode_to_release(self):
-        reference = dict(pickup=[.4,.5,.1,.1])
-        planner = CarryPlanner(reference,'none',use_original_drop=True)
+    def test_missing_d_never_releases_even_with_old_debug_option(self):
+        planner = CarryPlanner(dict(pickup=[.4,.5,.1,.1]), 'none', use_original_drop=True)
         planner.phase = 'DELIVER'
-        self.assertEqual(self.confirmed_action(planner,Box(.45,.3,.1,.1)),'UP_HOLDBOX')
-        self.assertEqual(self.confirmed_action(planner,Box(.1,.5,.1,.1)),'LEFT_HOLDBOX')
-        box = Box(.45,.5,.1,.1)
-        self.assertEqual(planner.decide(box,3,decoded=False),'WAIT')
-        self.assertEqual([planner.decide(box,3) for _ in range(3)],['WAIT','WAIT','DOWN_BOX'])
-        self.assertEqual(reference,dict(pickup=[.4,.5,.1,.1]))
+        self.assertEqual(planner.decide(Box(.45,.5,.1,.1),3), 'STOP')
 
     def test_original_drop_option_still_prefers_valid_d(self):
         planner = CarryPlanner(self.reference(),'none',use_original_drop=True)
@@ -45,8 +72,8 @@ class CarryVisionTests(unittest.TestCase):
             path = Path(folder)/'carry.json';path.write_text(json.dumps(reference))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
                  patch.object(carry_vision,'RobotEye',side_effect=RuntimeError('camera reached')):
-                with self.assertRaisesRegex(RuntimeError,'camera reached'):
-                    carry_vision.run('blue','DROP',actions=True,robot=Mock(),use_original_drop=True)
+                with self.assertRaisesRegex(ValueError,'腹部D参考或133头部J参考'):
+                    carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=Mock(),use_original_drop=True)
             self.assertEqual(json.loads(path.read_text()),reference)
 
     def test_small_qr_at_old_release_line_never_releases(self):
@@ -66,7 +93,7 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual([planner.decide(box,3) for _ in range(3)],['WAIT','WAIT','DOWN_BOX'])
 
     def test_invalid_or_missing_d_prevents_camera_and_body_startup(self):
-        for changes in ({'drop_head_position':120}, {'drop_head_position':129}, {'drop':None}, {'drop':[.4,.3,0,.2]}):
+        for changes in ({'drop_camera':'head'}, {'drop_camera':None}, {'drop':None}, {'drop':[.4,.3,0,.2]}):
             with self.subTest(changes=changes),tempfile.TemporaryDirectory() as folder:
                 reference = dict(version=3,cameras=camera_settings(),target_qr='DROP',
                                  shapes=dict(head=[480,640],belly=[480,640]),**self.reference())
@@ -75,10 +102,10 @@ class CarryVisionTests(unittest.TestCase):
                 robot=Mock()
                 with patch.object(carry_vision,'REFERENCE_FILE',path),patch.object(carry_vision,'RobotEye') as eye:
                     with self.assertRaisesRegex(ValueError,'D参考'):
-                        carry_vision.run('blue','DROP',actions=True,robot=robot)
+                        carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot)
                 eye.assert_not_called();robot.robotMove.assert_not_called()
 
-    def test_saving_d_with_changed_target_preserves_old_h_and_reference(self):
+    def test_saving_d_with_changed_target_preserves_old_h(self):
         frame=np.zeros((480,640,3),np.uint8)
         head,belly,servo=Mock(),Mock(),Mock()
         head.getImage.return_value=belly.getImage.return_value=(True,frame)
@@ -95,7 +122,10 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=[ord('d')]+[-1]*6+[ord('d'),ord('q')]):
                 self.assertFalse(carry_vision.run('blue','NEW'))
-            self.assertEqual(json.loads(path.read_text()),reference)
+            saved = json.loads(path.read_text())
+            self.assertEqual(saved['pickup'],reference['pickup'])
+            self.assertEqual(saved['target_qr'],'NEW')
+            self.assertEqual(saved['drop_camera'],'belly')
 
     def test_selected_color_finds_one_block_among_equal_shapes(self):
         frame = np.zeros((240,400,3),np.uint8)
@@ -141,7 +171,7 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual(self.confirmed_action(planner,Box(.4,.65,.1,.1)),'UP_LITTLE')
 
     def test_old_head129_drop_reference_stops_instead_of_using_default_line(self):
-        reference = self.reference();reference.pop('drop_head_position')
+        reference = self.reference();reference.pop('drop_camera')
         planner = CarryPlanner(reference,'none');planner.phase = 'DELIVER'
         self.assertEqual(self.confirmed_action(planner,Box(.4,.3,.2,.2)),'STOP')
         self.assertEqual(self.confirmed_action(planner,Box(.4,.7,.2,.15)),'STOP')
@@ -262,11 +292,11 @@ class CarryVisionTests(unittest.TestCase):
                      patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                      patch.object(cv2,'waitKey',side_effect=[-1]*120+[ord('q')]), \
                      patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.2 for i in range(3000))):
-                    self.assertEqual(carry_vision.run('blue','DROP',actions=True,robot=robot),clipped_belly)
+                    self.assertEqual(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot),clipped_belly)
                 sent = [call.args[0] for call in robot.robotMove.call_args_list]
                 self.assertEqual(sent, ['UP_LITTLE','HOLD_BOX','DOWN_BOX'] if clipped_belly else ['UP_LITTLE']*4)
                 self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],
-                                 [125] if clipped_belly else [129,135,140])
+                                 [133] if clipped_belly else [133,139,140])
 
     def test_transfer_crosses_missing_head_view_then_belly_grasps_and_delivers(self):
         hf=np.zeros((480,640,3),np.uint8);bf=hf.copy()
@@ -292,10 +322,10 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(3000))):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE','UP_LITTLE','HOLD_BOX','DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],133)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_qr_search_budget_resets_after_target_returns(self):
@@ -329,7 +359,7 @@ class CarryVisionTests(unittest.TestCase):
             path=Path(folder)/'carry.json'
             path.write_text(json.dumps(dict(version=3,cameras=camera_settings(),head_position=121,
                                            target_qr='DROP',shapes=dict(head=[480,640],belly=[480,640]),
-                                           pickup=[.4,.5,.1,.1],drop=[.4,.7,.2,.2],drop_head_position=125)))
+                                           pickup=[.4,.5,.1,.1],drop=[.4,.7,.2,.2],drop_camera='belly')))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
                  patch.object(carry_vision,'block_quality',return_value=(1.0,1.0)), \
                  patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
@@ -339,10 +369,10 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=now):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['HOLD_BOX']+['RIGHT_HOLDBOX']*2+['UP_HOLDBOX']+['RIGHT_HOLDBOX']*3+['DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],133)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_visible_head_target_can_approach_five_steps_before_belly_takes_over(self):
@@ -369,10 +399,10 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(3000))):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE']*5+['HOLD_BOX','DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],133)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_small_low_head_target_does_not_trigger_blind_transfer_limit(self):
@@ -399,10 +429,10 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(3000))):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE']*5+['HOLD_BOX','DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],133)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_partial_reference_matches_only_current_local_region(self):
@@ -494,7 +524,7 @@ class CarryVisionTests(unittest.TestCase):
         reference=dict(version=3,cameras=camera_settings(),head_position=121,target_qr='DROP',
                        shapes=dict(head=[480,640],belly=[480,640]),pickup=[.3,.6,.3,.4],
                        pickup_mode='visible_region',pickup_clipped=[False,False,False,True],
-                       drop=[.4,.3,.2,.2],drop_head_position=125)
+                       drop=[.4,.3,.2,.2],drop_camera='belly')
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'carry.json';path.write_text(json.dumps(reference))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
@@ -506,10 +536,10 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.02 for i in range(3000))):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
             self.assertEqual(json.loads(path.read_text()),reference)
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],['UP_LITTLE','HOLD_BOX','DOWN_BOX'])
-        servo.begin_vertical.assert_called_once_with(125)
+        servo.begin_vertical.assert_called_once_with(133)
 
     def test_head_move_keeps_identity_and_recovers_without_overlap(self):
         tracker=BlockTracker();box=Box(200,300,100,100)
@@ -585,10 +615,10 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.02 for i in range(3000))):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE','HOLD_BOX','DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],133)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_initial_scores_choose_blue_over_dark_blue_black_and_strip(self):
@@ -727,7 +757,7 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=[-1]*30+[ord('q')]), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(3000))):
-                self.assertFalse(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertFalse(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         servo.begin_vertical.assert_called()
         robot.robotMove.assert_not_called()
 
@@ -924,7 +954,7 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=[-1]*20+[ord('q')]), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(3000))):
-                self.assertFalse(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertFalse(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         actions = [call.args[0] for call in robot.robotMove.call_args_list]
         self.assertTrue(actions)
         self.assertEqual(set(actions),{'UP_LITTLE'})
@@ -954,7 +984,7 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.02 for i in range(3000))):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE','HOLD_BOX','DOWN_BOX'])
 
@@ -970,7 +1000,7 @@ class CarryVisionTests(unittest.TestCase):
         head,belly,servo,robot = Mock(),Mock(),Mock(),Mock()
         head.getImage.return_value = belly.getImage.return_value = (True,frame)
         servo.is_moving.return_value = False
-        angle = 123
+        angle = 127
         forwards = 0
         def turn(value,**kwargs):
             nonlocal angle
@@ -978,14 +1008,14 @@ class CarryVisionTests(unittest.TestCase):
         def move(action):
             nonlocal forwards
             if action == 'UP_LITTLE':
-                if forwards == 2: self.assertGreaterEqual(angle,129)
+                if forwards == 2: self.assertGreaterEqual(angle,133)
                 forwards += 1
         def blocks(image,color,near=False):
             if near:
                 if forwards >= 4: return [Box(0,72,600,408)]
                 if forwards >= 3: return [Box(200,384,100,96)]
                 return []
-            if forwards == 2 and angle < 129: return []
+            if forwards == 2 and angle < 133: return []
             return [Box(220,180,200,120)]
         servo.begin_vertical.side_effect = turn
         robot.robotMove.side_effect = move
@@ -1003,10 +1033,10 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.02 for i in range(4000))):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE']*4+['HOLD_BOX','DOWN_BOX'])
-        self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[126,129,125])
+        self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[130,133,133])
 
     def test_pickup_line_at_upper_20_percent_boundary(self):
         reference = self.reference()
@@ -1067,7 +1097,7 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=[-1]*240+[ord('q')]), \
                  patch.object(carry_vision.time,'monotonic',side_effect=now):
-                self.assertFalse(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertFalse(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         angles = [angle for angle,_ in turns]
         self.assertIn(120,angles)
         self.assertIn(140,angles)
@@ -1091,10 +1121,10 @@ class CarryVisionTests(unittest.TestCase):
             turns.append(angle)
             if followed:
                 done = True
-            elif target_visible and angle == 129:
+            elif target_visible and angle == 128:
                 target_visible = False
                 followed = True
-            elif angle == 123 and 140 in turns:
+            elif angle == 122 and 140 in turns:
                 target_visible = True
         servo.begin_vertical.side_effect = turn
         def blocks(image,color,near=False):
@@ -1111,9 +1141,9 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=lambda _:ord('q') if done else -1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(10000))):
-                self.assertFalse(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertFalse(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertTrue(followed)
-        self.assertEqual(turns[-3:],[123,129,132])
+        self.assertEqual(turns[-3:],[122,128,131])
         robot.robotMove.assert_not_called()
 
     def test_delivery_observes_for_1_2_seconds_between_body_steps(self):
@@ -1137,7 +1167,7 @@ class CarryVisionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'carry.json'
             path.write_text(json.dumps(dict(version=3,cameras=camera_settings(),target_qr='DROP',
-                shapes=dict(head=[480,640],belly=[480,640]),pickup=[.4,.5,.1,.1],drop=[.4,.35,.2,.3],drop_head_position=125)))
+                shapes=dict(head=[480,640],belly=[480,640]),pickup=[.4,.5,.1,.1],drop=[.4,.35,.2,.3],drop_camera='belly')))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
                  patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
                  patch.object(carry_vision,'find_blocks',side_effect=lambda image,color,near=False:
@@ -1148,7 +1178,7 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=now):
-                self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
+                self.assertTrue(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0,robot=robot))
         self.assertEqual([action for action,_ in sent],
                          ['HOLD_BOX','UP_HOLDBOX','UP_HOLDBOX','DOWN_BOX'])
 
@@ -1192,7 +1222,7 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual(self.confirmed_action(planner,Box(.49,.3,.1,.1)),'UP_HOLDBOX')
 
     def reference(self):
-        return dict(pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2],drop_head_position=125)
+        return dict(pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2],drop_camera='belly')
 
     def confirmed_action(self, planner, box):
         for _ in range(5): action=planner.decide(box,5)
@@ -1223,7 +1253,7 @@ class CarryVisionTests(unittest.TestCase):
         planner.actions=40
         self.assertEqual(planner.decide(Box(.4,.3,.2,.2),5),'STOP')
 
-    def test_real_entry_selects_destination_and_closes_resources(self):
+    def check_real_entry(self, delivery_turns, missing_qr=False, visibility='both'):
         settings=camera_settings()
         frame=np.zeros((480,640,3),np.uint8)
         pickup=Box(256,72,64,48);drop=Box(256,144,128,96)
@@ -1242,31 +1272,68 @@ class CarryVisionTests(unittest.TestCase):
         robot_factory=Mock(return_value=robot)
         reference=dict(version=2,cameras=settings,head_position=129,target_qr='DROP',
                        shapes=dict(head=[480,640],belly=[480,640]),**self.reference())
+        if visibility in ('head','head_then_belly'):
+            reference.update(drop_head=[.4,.3,.2,.2],drop_head_position=133)
+        if visibility == 'head':
+            reference.pop('drop')
+            reference.pop('drop_camera')
+        def decode_qr(image, detector):
+            if missing_qr or visibility == 'belly' and image is head_frame:
+                return []
+            if visibility == 'head' and image is frame:
+                return []
+            if visibility == 'head_then_belly':
+                if (image is head_frame) == near_qr:
+                    return []
+            return [('OTHER',Box(10,10,30,30)),('DROP',drop if near_qr else Box(288,72,64,48))]
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'carry_reference.json';path.write_text(json.dumps(reference))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
                  patch.object(carry_vision,'block_quality',return_value=(1.0,1.0)), \
                  patch.object(carry_vision,'RobotEye',side_effect=[eye,belly]), \
                  patch.object(carry_vision,'find_blocks',side_effect=lambda image,color,near=False: [Box(288,150,64,48)] if image is head_frame else ([pickup] if approached else [])), \
-                 patch.object(carry_vision,'read_qr_codes',side_effect=lambda *args: [('OTHER',Box(10,10,30,30)),('DROP',drop if near_qr else Box(288,72,64,48))]), \
+                 patch.object(carry_vision,'read_qr_codes',side_effect=decode_qr) as decode, \
                  patch.dict('sys.modules',{
                      'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo),
                      'robotmove':types.SimpleNamespace(RobotMove=robot_factory)}), \
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',return_value=-1), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(1000))):
-                self.assertTrue(carry_vision.run('red','DROP',actions=True))
+                self.assertEqual(carry_vision.run('red','DROP',actions=True,
+                                 delivery_right_actions=delivery_turns,search_right_actions=1),not missing_qr)
             self.assertEqual(json.loads(path.read_text()),reference)
-        self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],['UP_LITTLE','HOLD_BOX','UP_HOLDBOX','DOWN_BOX'])
-        servo.turn_vertical.assert_called_once_with(123)
-        servo.begin_vertical.assert_called_with(125)
+        self.assertTrue(any(call.args[0] is frame for call in decode.call_args_list))
+        self.assertTrue(any(call.args[0] is head_frame for call in decode.call_args_list))
+        self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
+                         ['UP_LITTLE','HOLD_BOX']+['RIGHT_HOLDBOX']*delivery_turns+
+                         (['RIGHT_HOLDBOX'] if missing_qr else ['UP_HOLDBOX','DOWN_BOX']))
+        servo.turn_vertical.assert_called_once_with(127)
+        servo.begin_vertical.assert_called_with(133)
         robot.close.assert_called_once();servo.cleanup.assert_called_once();eye.close.assert_called_once();belly.close.assert_called_once()
+
+    def test_real_entry_selects_destination_and_closes_resources(self):
+        self.check_real_entry(0)
+
+    def test_initial_right_turns_only_after_pickup_and_before_approach(self):
+        self.check_real_entry(2)
+
+    def test_missing_belly_qr_never_blind_walks_or_releases_after_initial_turn(self):
+        self.check_real_entry(2,missing_qr=True)
+
+    def test_head_occluded_belly_still_completes_delivery(self):
+        self.check_real_entry(1,visibility='belly')
+
+    def test_belly_occluded_head133_reference_completes_delivery(self):
+        self.check_real_entry(1,visibility='head')
+
+    def test_head_occluded_near_target_switches_to_belly_reference(self):
+        self.check_real_entry(1,visibility='head_then_belly')
 
     def test_missing_reference_does_not_open_camera_or_serial(self):
         with tempfile.TemporaryDirectory() as folder:
             with patch.object(carry_vision,'REFERENCE_FILE',Path(folder)/'missing.json'), \
                  patch.object(carry_vision,'RobotEye') as eye:
-                with self.assertRaises(ValueError): carry_vision.run('red','DROP',actions=True)
+                with self.assertRaises(ValueError): carry_vision.run('red','DROP',actions=True,delivery_right_actions=0)
                 eye.assert_not_called()
 
     def test_preview_never_opens_body_serial(self):
@@ -1288,7 +1355,56 @@ class CarryVisionTests(unittest.TestCase):
         factory.assert_not_called()
         eye.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
 
-    def test_preview_saves_belly_pickup_and_head_qr_in_separate_dual_reference(self):
+    def test_d_only_calibration_for_new_target_preserves_existing_h(self):
+        frame = np.zeros((480,640,3),np.uint8)
+        head,belly,servo = Mock(),Mock(),Mock()
+        head.getImage.return_value = belly.getImage.return_value = (True,frame)
+        servo.is_moving.return_value = False
+        original = dict(version=3,cameras=camera_settings(),shapes=dict(head=[480,640],belly=[480,640]),
+                        target_qr='OLD',pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2],drop_head_position=125)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'reference.json';path.write_text(json.dumps(original))
+            with patch.object(carry_vision,'REFERENCE_FILE',path), \
+                 patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
+                 patch.object(carry_vision,'find_blocks',return_value=[]), \
+                 patch.object(carry_vision,'read_qr_codes',return_value=[('action2',Box(256,144,128,96))]), \
+                 patch.dict('sys.modules',{'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kw:servo)}), \
+                 patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
+                 patch.object(cv2,'waitKey',side_effect=[-1]*6+[ord('d'),ord('q')]):
+                self.assertFalse(carry_vision.run('blue','action2'))
+            saved = json.loads(path.read_text())
+        self.assertEqual(saved['pickup'],original['pickup'])
+        self.assertEqual(saved['target_qr'],'action2')
+        self.assertEqual(saved['drop_camera'],'belly')
+
+    def test_j_saves_133_head_reference_without_overwriting_belly_d_or_h(self):
+        hf=np.zeros((240,320,3),np.uint8);bf=np.zeros((480,640,3),np.uint8)
+        head,belly,servo=Mock(),Mock(),Mock()
+        head.getImage.return_value=(True,hf);belly.getImage.return_value=(True,bf)
+        servo.is_moving.return_value=False
+        original=dict(version=3,cameras=camera_settings(),target_qr='action2',
+                      shapes=dict(head=[240,320],belly=[480,640]),**self.reference())
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'ref.json';path.write_text(json.dumps(original))
+            def decode(image,detector):
+                return [('action2',Box(128,72,64,48) if image is hf else Box(256,144,128,96))]
+            with patch.object(carry_vision,'REFERENCE_FILE',path), \
+                 patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
+                 patch.object(carry_vision,'find_blocks',return_value=[]), \
+                 patch.object(carry_vision,'read_qr_codes',side_effect=decode), \
+                 patch.dict('sys.modules',{'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kw:servo)}), \
+                 patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
+                 patch.object(cv2,'waitKey',side_effect=[ord('j')]+[-1]*6+[ord('j'),ord('q')]):
+                self.assertFalse(carry_vision.run('blue','action2'))
+            saved=json.loads(path.read_text())
+        self.assertEqual(saved['pickup'],original['pickup'])
+        self.assertEqual(saved['drop'],original['drop'])
+        self.assertEqual(saved['drop_camera'],'belly')
+        self.assertEqual(saved['drop_head'],[.4,.3,.2,.2])
+        self.assertEqual(saved['drop_head_position'],133)
+        servo.begin_vertical.assert_called_once_with(133)
+
+    def test_preview_saves_belly_pickup_and_belly_qr_with_different_camera_sizes(self):
         hf=np.zeros((240,320,3),np.uint8)
         bf=np.zeros((480,640,3),np.uint8)
         head,belly,servo=Mock(),Mock(),Mock()
@@ -1300,14 +1416,16 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(carry_vision,'block_quality',return_value=(1.0,1.0)), \
                  patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
                  patch.object(carry_vision,'find_blocks',side_effect=lambda image,color,near=False: [Box(256,240,64,48)] if image is bf else []), \
-                 patch.object(carry_vision,'read_qr_codes',return_value=[('DROP',Box(128,72,64,48))]), \
+                 patch.object(carry_vision,'read_qr_codes',return_value=[('DROP',Box(256,144,128,96))]) as decode, \
                  patch.dict('sys.modules',{'Head':types.SimpleNamespace(RobotHeadServoOnly=lambda **kwargs:servo)}), \
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=[-1]*6+[ord('h'),ord('d')]+[-1]*6+[ord('d'),ord('q')]):
                 self.assertFalse(carry_vision.run('blue','DROP'))
             reference=json.loads(path.read_text())
+        self.assertTrue(all(call.args[0] is bf for call in decode.call_args_list))
+        self.assertNotIn('drop_head_position',reference)
         self.assertEqual(reference['version'],3)
-        self.assertEqual(reference['drop_head_position'],125)
+        self.assertEqual(reference['drop_camera'],'belly')
         self.assertEqual(reference['pickup'],[.4,.5,.1,.1])
         self.assertEqual(reference['drop'],[.4,.3,.2,.2])
         self.assertEqual(reference['shapes'],dict(head=[240,320],belly=[480,640]))
@@ -1336,8 +1454,8 @@ class CarryVisionTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=lambda _:next(keys)), \
                  patch.object(carry_vision.time,'monotonic',side_effect=iter(i*.1 for i in range(1000))):
-                self.assertFalse(carry_vision.run('blue','DROP',actions=True))
-        servo.begin_vertical.assert_called_once_with(126,settle_seconds=.5)
+                self.assertFalse(carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0))
+        servo.begin_vertical.assert_called_once_with(130,settle_seconds=.5)
         # 两个相机已看见，但尚未到腹部标定抱取位置，不发抱取指令。
         self.assertTrue(all(call.args[0] != 'HOLD_BOX' for call in robot.robotMove.call_args_list))
         self.assertTrue(all(call.args[0] not in ('TURN_LEFT','TURN_RIGHT') for call in robot.robotMove.call_args_list))
@@ -1347,5 +1465,5 @@ class CarryVisionTests(unittest.TestCase):
             path=Path(folder)/'carry_dual_reference.json'
             path.write_text(json.dumps(dict(version=1,pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2])))
             with patch.object(carry_vision,'REFERENCE_FILE',path),patch.object(carry_vision,'RobotEye') as eye:
-                with self.assertRaises(ValueError):carry_vision.run('blue','DROP',actions=True)
+                with self.assertRaises(ValueError):carry_vision.run('blue','DROP',actions=True,delivery_right_actions=0)
                 eye.assert_not_called()

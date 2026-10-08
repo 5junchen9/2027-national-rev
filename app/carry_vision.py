@@ -14,8 +14,8 @@ from kick_shapes import Box, overlap
 from handover_debug import Handover
 from ball_debug import distinct_from_background
 
-INITIAL_HEAD_POSITION = 123
-DELIVERY_HEAD_POSITION = 125
+INITIAL_HEAD_POSITION = 127
+DELIVERY_HEAD_POSITION = 133
 TRACK_FRAMES = 2
 PICKUP_FRAMES = 2
 FINAL_FRAMES = 5  # 保存标定仍确认5帧。
@@ -513,15 +513,24 @@ def reference_for_target(reference, target_qr):
     if reference.get('target_qr') != target_qr:
         reference.pop('drop',None)
         reference.pop('drop_head_position',None)
+        reference.pop('drop_camera',None)
+        reference.pop('drop_head',None)
         reference['target_qr'] = target_qr
     return reference
 
 
-def drop_reference(reference):
-    """只接受125头位、完整画面内的D参考，不用默认横线代替投放位置。"""
-    if not reference or reference.get('drop_head_position') != DELIVERY_HEAD_POSITION:
+def drop_reference(reference, camera='belly'):
+    """两路参考分开；头部只接受133头位的新参考，旧D不会自动转换。"""
+    if not reference:
         return None
-    values = reference.get('drop')
+    if camera == 'head':
+        if reference.get('drop_head_position') != DELIVERY_HEAD_POSITION:
+            return None
+        values = reference.get('drop_head')
+    else:
+        if reference.get('drop_camera') != 'belly':
+            return None
+        values = reference.get('drop')
     if not isinstance(values,(list,tuple)) or len(values) != 4:
         return None
     if not all(isinstance(value,(int,float)) and math.isfinite(value) for value in values):
@@ -530,6 +539,17 @@ def drop_reference(reference):
     if box.width <= 0 or box.height <= 0 or box.x < 0 or box.y < 0 or box.x+box.width > 1 or box.bottom > 1:
         return None
     return box
+
+
+def select_qr_camera(matches, trackers, boxes, reference):
+    """有当前完整解码才参与控制；优先有投放标定的腹部，其次头部。"""
+    visible = [name for name in ('belly','head')
+               if len(matches[name]) == 1 and boxes[name] is not None
+               and trackers[name].source == 'decoded' and trackers[name].frames >= TRACK_FRAMES]
+    for name in visible:
+        if drop_reference(reference,name) is not None:
+            return name
+    return visible[0] if visible else None
 
 
 class CarryPlanner:
@@ -551,7 +571,7 @@ class CarryPlanner:
         self.pending = None
         self.confirm_frames = 0
 
-    def decide(self, box, stable_frames, now=None, decoded=True):
+    def decide(self, box, stable_frames, now=None, decoded=True, camera='belly'):
         now = time.monotonic() if now is None else now
         if self.phase == 'DONE': return 'DONE'
         if self.actions >= 40 or now-self.started_at >= RUN_SECONDS:
@@ -569,28 +589,20 @@ class CarryPlanner:
                 self.reason = '6 belly approach steps without reaching pickup line; stop'
                 return 'STOP'
         else:
-            target = drop_reference(self.reference)
-            if target is None and self.use_original_drop:
-                # 旧版只有画面下沿阈值，不能据此推算真实投放距离。
+            target = drop_reference(self.reference,camera)
+            if target is None:
+                if drop_reference(self.reference) is None and drop_reference(self.reference,'head') is None:
+                    self.reason = 'STOP: valid placement reference required'
+                    return 'STOP'
+                # 另一摄像头可辅助找方向；没有该视角D时不推算距离、不放下。
                 dx = box.cx-.5
-                tolerance = .16 if self.delivery_aligned else .12
-                if abs(dx) > tolerance:
-                    self.delivery_aligned = False
-                    action = steering('LEFT_HOLDBOX' if dx < 0 else 'RIGHT_HOLDBOX',self.flip)
-                elif box.bottom < .60-.03:
-                    self.delivery_aligned = True
-                    action = 'UP_HOLDBOX'
-                elif not decoded:
+                if not decoded or abs(dx) <= .12:
                     self.reset_confirmation()
-                    self.reason = 'original drop line reached; need fresh exact QR decode'
+                    self.reason = 'QR direction found; need calibrated camera for approach'
                     return 'WAIT'
-                else:
-                    self.delivery_aligned = True
-                    action = 'DOWN_BOX'
-                self.reason = f'original drop rule: QR bottom={box.bottom:.0%}; '+action
-            elif target is None:
-                self.reason = 'STOP: valid D placement reference at head125 required'
-                return 'STOP'
+                action = steering('LEFT_HOLDBOX' if dx < 0 else 'RIGHT_HOLDBOX',self.flip)
+                self.reason = 'uncalibrated camera: turn only'
+                return self.confirm_action(action,stable_frames)
             else:
                 return self.decide_placement(box,stable_frames,target,decoded)
         return self.confirm_action(action,stable_frames)
@@ -663,26 +675,32 @@ class CarryPlanner:
 
 
 def run(color, target_qr, actions=False, robot=None, search_right_actions=5, deadline=None,
-        qr_reader=None, use_original_drop=False, eyes=None, servo=None):
+        qr_reader=None, use_original_drop=False, eyes=None, servo=None, delivery_right_actions=1):
+    if type(delivery_right_actions) is not int or not 0 <= delivery_right_actions <= 10:
+        raise ValueError("抱起后右转次数须为0至10的整数，实际角度需现场测量")
     settings = camera_settings()
     reference = json.loads(REFERENCE_FILE.read_text()) if REFERENCE_FILE.exists() else None
+    reference = reference_for_target(reference,target_qr)
     if actions:
-        reference = reference_for_target(reference,target_qr)
         if (reference is None or reference.get('version') not in (2,3)
                 or reference.get('cameras') != settings
                 or reference.get('target_qr') != target_qr
                 or 'pickup' not in reference):
-            raise ValueError('双摄配置或H参考不匹配，请先恢复原相机配置并核对H；实际投放还需125头位D参考')
-        if drop_reference(reference) is None and not use_original_drop:
-            raise ValueError('实际投放需要125头位的D参考：在物块实际应放下的位置保存D；保留已有H标定')
+            raise ValueError('双摄配置或H参考不匹配，请先恢复原相机配置并核对H；实际投放还需腹部D或133头部J参考')
+        if drop_reference(reference) is None and drop_reference(reference,'head') is None:
+            raise ValueError('实际投放需要腹部D参考或133头部J参考：在物块实际应放下的位置保存D；保留已有H标定')
     planner = CarryPlanner(reference,settings['belly']['flip'],use_original_drop) if actions else None
     handover = Handover(dict(forward=INITIAL_HEAD_POSITION,down_sign=1,
                              bounds=[HEAD_SEARCH_MIN,HEAD_SEARCH_MAX]))
     handover.down = HEAD_SEARCH_MAX  # 只覆盖搬运范围，不改变球类任务的共享默认值。
     head_tracker,belly_tracker,qr_tracker = BlockTracker(recover_head=True),BlockTracker(near=True),DestinationTracker()
+    qr_trackers = {'head':DestinationTracker(),'belly':qr_tracker}
+    control_camera = None
+    last_qr_camera = 'belly'
     detector = cv2.QRCodeDetector()
     seen_contents = set()
     search_turns = 0
+    delivery_turns_remaining = 0
     qr_missing_since = None
     transferring = False
     transfer_steps = 0
@@ -713,9 +731,10 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
         ready_at = time.monotonic()+.5
         print('目标颜色:',color,'目的地二维码:',target_qr)
         print('候选显示score总分、C颜色分、S形状分；这是匹配评分，不是识别概率。')
-        print('H=123头位/保存腹部抱取位置；D=125头位/保存二维码放下位置；Q=退出。')
+        print('H=腹部抱取；D=腹部投放；J=133头部投放；Q=退出。')
+        print('抱起后预右转次数:',delivery_right_actions,'；次数不是角度，需现场测量。')
         print('腹部确认后独占接近控制；旧位置失配时单个强目标稳定3帧重新确认。H可保存局部参考。')
-        print('未确认腹部候选不阻断可靠头部靠近；抱取完成后仅头部二维码识别参与动作，腹部仅预览。')
+        print('未确认腹部候选不阻断可靠头部靠近；抱起并完成指定右转后，头部133与腹部共同找目的地；优先使用有标定且实际解码成功的视角。')
         print('接近、腹部接手和抱起确认2帧；放下确认3帧，保存参考仍确认5帧。')
         print('H仅参考横向位置；不比较盒子尺寸，不追加面积或形状分抱取门槛。')
         print('腹部目标横向对齐后，上沿到达或高于顶部20%横线（y<=20%）才抱取；每次小步后重新观察，最多6次。上方20%线需现场验证。')
@@ -725,10 +744,7 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
         print('交接须目标居中、下沿到88%、宽度至少30%、框面积至少10%。')
         print('看得见目标时正常靠近；近处丢失后先低头找回，到低头边界仍丢失才最多惯性前进3次UP_LITTLE，腹部未接手则停止。')
         print('实际投放用D位置与宽高参考：宽高达到参考90%至120%、中心接近，且目标二维码连续解码3帧才放下；超过120%停止。')
-        if use_original_drop and drop_reference(reference) is None:
-            print('调试沿用H：缺D时使用旧版下沿60%参考，提前3%触发、目标二维码解码确认3帧；实际投放位置尚未验证。')
-        else:
-            print('在实机确认适合放下的位置保存D，头位125；已有正确D可沿用。缺D不启用身体搬运。')
+        print('在真实抱物姿态、适合放下的位置，D保存腹部，J保存133头部投放参考；至少一份有效，原标定不会自动修改。')
         while True:
             if deadline is not None and time.monotonic() >= deadline:
                 print('比赛总期限到达，停止搬运');return False
@@ -760,21 +776,37 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                     head_block = None
                     head_blocks = []
                 # 腹部接手后锁定阶段，短暂丢失不退回头部前进。
-            codes = []
+            frames = {'head':hf,'belly':bf}
+            codes_by_camera = {'head':[],'belly':[]}
+            matches_by_camera = {'head':[],'belly':[]}
+            qr_boxes = {'head':None,'belly':None}
             if not actions or planner.phase != 'PICKUP':
-                codes = qr_reader(hf) if qr_reader is not None else read_qr_codes(hf,detector)
-            for content,_ in codes:
-                if content not in seen_contents:
-                    print('读到二维码:',content);seen_contents.add(content)
-            matches = [box for content,box in codes if content == target_qr]
-            qr = qr_tracker.update(matches,frame=hf)
+                for name in ('head','belly'):
+                    if name == 'head' and (head_busy or handover.angle != DELIVERY_HEAD_POSITION):
+                        qr_trackers[name].reset()
+                        continue
+                    image = frames[name]
+                    codes_by_camera[name] = qr_reader(image) if qr_reader is not None else read_qr_codes(image,detector)
+                    for content,_ in codes_by_camera[name]:
+                        if content not in seen_contents:
+                            print('读到二维码:',name,content);seen_contents.add(content)
+                    matches_by_camera[name] = [box for content,box in codes_by_camera[name] if content == target_qr]
+                    qr_boxes[name] = qr_trackers[name].update(matches_by_camera[name],frame=image)
+            selected_camera = select_qr_camera(matches_by_camera,qr_trackers,qr_boxes,reference)
+            if selected_camera != control_camera:
+                if planner is not None: planner.reset_confirmation()
+                control_camera = selected_camera
+            qr = qr_boxes[control_camera] if control_camera is not None else None
+            qr_tracker = qr_trackers[control_camera or 'belly']
+            matches = matches_by_camera[control_camera] if control_camera else [None]*max(len(v) for v in matches_by_camera.values())
             if head_busy:
-                head_tracker.after_head_move();qr_tracker.reset()
-                head_block = qr = None
-            if qr is not None:
+                head_tracker.after_head_move()
+                head_block = None
+            if qr is not None and not delivery_turns_remaining:
                 qr_missing_since = None
                 search_turns = 0
-                last_qr_x = qr.cx/hf.shape[1]
+                last_qr_camera = control_camera
+                last_qr_x = qr.cx/frames[control_camera].shape[1]
             for name,frame,blocks in [('head',hf,head_blocks),('belly',bf,belly_blocks)]:
                 display = frame.copy()
                 for box in blocks:
@@ -784,27 +816,28 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                     label = f'score={score:.2f} C={color_score:.2f} S={shape_score:.2f}'
                     if box in tracker.rejections: label += ' '+tracker.rejections[box]
                     cv2.putText(display,label,(int(box.x),max(90,int(box.y)-5)),0,.4,(0,255,255),1)
-                if name == 'head':
-                    for content,box in codes:
+                if not pickup_active or not actions:
+                    for content,box in codes_by_camera[name]:
                         cv2.rectangle(display,(int(box.x),int(box.y)),(int(box.x+box.width),int(box.bottom)),(255,255,0),2)
                         cv2.putText(display,content,(int(box.x),max(15,int(box.y)-5)),0,.5,(255,255,0),1)
                 phase = planner.phase if actions else 'PREVIEW'
-                reason = planner.reason if actions else 'H=pickup at 123; D=QR drop at 125; Q=quit'
+                reason = planner.reason if actions else 'H=pickup; D=belly drop; J=head133 drop; Q=quit'
                 cv2.putText(display,f'{phase} {handover.phase} color={color} head={handover.angle}',(8,25),0,.5,(255,255,255),1)
                 if name == 'belly' and bottom_clipped and not local_pickup and not actions:
                     reason = 'partial block: H can save visible pickup region'
                 cv2.putText(display,reason,(8,48),0,.45,(255,255,255),1)
                 if name == 'belly':
                     status = (f'belly: blocks={len(belly_blocks)} stable={belly_tracker.frames}/{TRACK_FRAMES}'
-                              if pickup_active else 'belly: preview only; block detection off')
+                              if pickup_active and actions else f'belly: QR decoded={len(matches)} {qr_tracker.source} stable={qr_tracker.frames}/{DROP_FRAMES}')
                 else:
-                    status = f'head: blocks={len(head_blocks)} lock={int(head_tracker.identity_box is not None)} frames={head_tracker.frames}/{TRACK_FRAMES} QR={len(matches)} {qr_tracker.source}'
+                    status = f'head: blocks={len(head_blocks)} lock={int(head_tracker.identity_box is not None)} frames={head_tracker.frames}/{TRACK_FRAMES}'
                     if actions and planner.phase == 'PICKUP' and handover.phase == 'BELLY':
                         status = 'head: block detection off; belly controls pickup'
-                    if actions and planner.phase == 'DELIVER':
-                        status = f'head: QR decoded={len(matches)} {qr_tracker.source} stable={qr_tracker.frames}/{DROP_FRAMES}'
+                if not actions or planner.phase == 'DELIVER':
+                    current_tracker = qr_trackers[name]
+                    status = f'{name}: QR={len(matches_by_camera[name])} {current_tracker.source} stable={current_tracker.frames} control={control_camera or "none"}'
                 if name == 'head':
-                    detail = ('target QR: '+qr_tracker.source if actions and planner.phase == 'DELIVER'
+                    detail = ('dual QR; fresh decode required' if actions and planner.phase == 'DELIVER'
                               else 'belly controls pickup; head block detection off'
                               if actions and handover.phase == 'BELLY' else head_tracker.reason)
                     cv2.putText(display,detail,(8,92),0,.4,(0,255,255),1)
@@ -819,61 +852,77 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                     cv2.line(display,(0,y),(display.shape[1]-1,y),(0,255,255),1)
                     line_label = 'pickup top: y <= 20% (80% from bottom)'
                     cv2.putText(display,line_label,(8,max(110,y-6)),0,.4,(0,255,255),1)
-                if name == 'head' and handover.angle == DELIVERY_HEAD_POSITION:
-                    target = drop_reference(reference)
+                if name == 'belly' or handover.angle == DELIVERY_HEAD_POSITION:
+                    target = drop_reference(reference,name)
                     if target is not None:
                         height,width = display.shape[:2]
                         cv2.rectangle(display,(round(target.x*width),round(target.y*height)),
                                       (round((target.x+target.width)*width),round(target.bottom*height)),(0,255,255),1)
-                        if qr is not None:
-                            current = qr.normalized(display.shape)
+                        if qr_boxes[name] is not None:
+                            current = qr_boxes[name].normalized(display.shape)
                             cv2.putText(display,f'D size W={current.width/target.width:.0%} H={current.height/target.height:.0%}',
                                         (8,115),0,.5,(0,255,255),1)
                 cv2.imshow('carry '+name,display)
             key = cv2.waitKey(1)&255
             if key in (ord('q'),27): return False
-            if not actions and key in (ord('h'),ord('d')):
-                angle = INITIAL_HEAD_POSITION if key == ord('h') else DELIVERY_HEAD_POSITION
-                if handover.angle != angle:
+            if not actions and key in (ord('h'),ord('d'),ord('j')):
+                save_camera = 'head' if key == ord('j') else 'belly'
+                angle = DELIVERY_HEAD_POSITION if key == ord('j') else INITIAL_HEAD_POSITION
+                if key != ord('d') and handover.angle != angle:
                     handover.angle = angle;servo.begin_vertical(angle)
-                    head_tracker.after_head_move();qr_tracker.reset()
+                    head_tracker.after_head_move();qr_trackers['head'].reset()
                     print('已切换头位到',angle,'；等待稳定后再按同一个键保存。')
                     continue
-                if head_busy:
+                if key != ord('d') and head_busy:
                     print('头部仍在移动，请等画面稳定。');continue
-                box = belly_block if key == ord('h') else qr
-                tracker = belly_tracker if key == ord('h') else qr_tracker
+                box = belly_block if key == ord('h') else qr_boxes[save_camera]
+                tracker = belly_tracker if key == ord('h') else qr_trackers[save_camera]
                 if box is None or tracker.frames < 5:
-                    count = len(belly_blocks) if key == ord('h') else len(matches)
+                    count = len(belly_blocks) if key == ord('h') else len(matches_by_camera[save_camera])
                     if key == ord('h') and bottom_clipped:
                         print('物块底边出画，不能保存抱取参考。')
-                    print('腹部物块' if key == ord('h') else '头部目标二维码',
+                    print('腹部物块' if key == ord('h') else save_camera+'目标二维码',
                           '候选数=',count,'稳定帧=',tracker.frames,'/5；当前不能保存。');continue
-                if key == ord('d') and (qr_tracker.source != 'decoded' or len(matches) != 1):
+                if key != ord('h') and (tracker.source != 'decoded' or len(matches_by_camera[save_camera]) != 1):
                     print('D需当前画面精确解码到唯一目标二维码，不能只用模板跟踪保存。');continue
                 if (reference is None or reference.get('version') not in (2,3)
                         or reference.get('cameras') != settings or reference.get('shapes') != shapes
                         or reference.get('target_qr') != target_qr):
-                    if key == ord('d') and reference is not None:
+                    if key != ord('h') and reference is not None:
                         print('现有标定的相机/尺寸/目标不匹配，D未保存；先恢复原配置，保留原H参考。');continue
                     reference = dict(version=3,cameras=settings,head_position=INITIAL_HEAD_POSITION,
                                      target_qr=target_qr,shapes=shapes)
-                frame = bf if key == ord('h') else hf
-                normalized = box.normalized(frame.shape)
-                if key == ord('d') and (normalized.x <= .01 or normalized.y <= .01
+                normalized = box.normalized(frames[save_camera].shape)
+                if key != ord('h') and (normalized.x <= .01 or normalized.y <= .01
                                        or normalized.x+normalized.width >= .99 or normalized.bottom >= .99):
                     print('D需完整二维码，离画面边缘留出距离后再保存。');continue
                 reference['version'] = 3
-                if key == ord('d'): reference['drop_head_position'] = DELIVERY_HEAD_POSITION
+                if key == ord('d'):
+                    reference['drop_camera'] = 'belly'
+                    reference['drop'] = [normalized.x,normalized.y,normalized.width,normalized.height]
+                if key == ord('j'):
+                    reference['drop_head_position'] = DELIVERY_HEAD_POSITION
+                    reference['drop_head'] = [normalized.x,normalized.y,normalized.width,normalized.height]
                 if key == ord('h'):
+                    reference['pickup'] = [normalized.x,normalized.y,normalized.width,normalized.height]
                     reference['pickup_mode'] = 'visible_region'
                     reference['pickup_clipped'] = clipped_edges(normalized)
-                reference['pickup' if key == ord('h') else 'drop'] = [normalized.x,normalized.y,normalized.width,normalized.height]
                 REFERENCE_FILE.write_text(json.dumps(reference,ensure_ascii=False,indent=2))
                 print('已保存:',REFERENCE_FILE)
             if not actions or head_busy or time.monotonic() < ready_at: continue
             if planner.actions >= 40 or time.monotonic()-planner.started_at >= RUN_SECONDS:
                 print(f'40 actions / {RUN_SECONDS} seconds limit');return False
+            if planner.phase == 'DELIVER' and delivery_turns_remaining:
+                # 抱起后才右转；每次转完重新读双摄、等待稳定，不一口气连发。
+                print('抱起后右转，剩余次数:', delivery_turns_remaining)
+                move.robotMove('RIGHT_HOLDBOX')
+                planner.mark_sent('RIGHT_HOLDBOX')
+                delivery_turns_remaining -= 1
+                head_eye.discard_frames(1);belly_eye.discard_frames(1)
+                for tracker in qr_trackers.values(): tracker.after_move()
+                qr_missing_since = None
+                ready_at = time.monotonic()+DELIVERY_OBSERVE_SECONDS
+                continue
             if planner.phase == 'DELIVER' and qr is None and search_right_actions:
                 # 短暂漏读先等，随后向最后看到二维码的一侧有限找回；不按旧框前进或放下。
                 if qr_missing_since is None: qr_missing_since = time.monotonic()
@@ -883,11 +932,12 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                 if search_turns >= search_right_actions:
                     print('连续有限搜索后仍未找回目的地二维码，停止');return False
                 search_action = 'LEFT_HOLDBOX' if last_qr_x is not None and last_qr_x < .5 else 'RIGHT_HOLDBOX'
-                search_action = steering(search_action,settings['head']['flip'])
+                search_action = steering(search_action,settings[last_qr_camera]['flip'])
                 move.robotMove(search_action)
                 search_turns += 1;planner.mark_sent(search_action)
                 head_eye.discard_frames(1);belly_eye.discard_frames(1)
-                qr_tracker.after_move();qr_missing_since = None
+                for tracker in qr_trackers.values(): tracker.after_move()
+                qr_missing_since = None
                 ready_at = time.monotonic()+DELIVERY_OBSERVE_SECONDS
                 continue
             if planner.phase == 'PICKUP':
@@ -946,11 +996,16 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                     ready_at = time.monotonic()+HEAD_SEARCH_WAIT
                     continue
             else:
-                target = belly_block if planner.phase == 'PICKUP' else qr
-                tracker = belly_tracker if planner.phase == 'PICKUP' else qr_tracker
-                planner.flip = settings['belly' if planner.phase == 'PICKUP' else 'head']['flip']
-                action = planner.decide(target.normalized(bf.shape if planner.phase == 'PICKUP' else hf.shape) if target else None,
-                                        tracker.frames, decoded=qr_tracker.source == 'decoded')
+                if planner.phase == 'PICKUP':
+                    target, tracker = belly_block, belly_tracker
+                    camera = 'belly'
+                else:
+                    target, tracker = qr, qr_tracker
+                    camera = control_camera or 'belly'
+                planner.flip = settings[camera]['flip']
+                shape = frames[camera].shape
+                action = planner.decide(target.normalized(shape) if target else None,
+                                        tracker.frames, decoded=qr_tracker.source == 'decoded',camera=camera)
                 if planner.phase == 'PICKUP' and target is None:
                     planner.reason = belly_tracker.reason+'; hold body'
             if action in ('STOP','DONE'):
@@ -961,14 +1016,16 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
             if action == 'DOWN_BOX':
                 print('放下动作已执行；物块是否实际到位需要现场确认。');return True
             if action == 'HOLD_BOX':
-                # 抱取完成后调整到125，重新识别目的地二维码。
+                # 先调整到133，再完成抱物右转；两路相机独立识别目的地。
+                delivery_turns_remaining = delivery_right_actions
                 handover.phase = 'HEAD'
                 handover.angle = DELIVERY_HEAD_POSITION;servo.begin_vertical(DELIVERY_HEAD_POSITION)
             head_eye.discard_frames(1);belly_eye.discard_frames(1)
             if action == 'HOLD_BOX':
                 head_tracker.reset();belly_tracker.reset()
             else: head_tracker.after_body_move()
-            belly_tracker.after_body_move();qr_tracker.after_move()
+            belly_tracker.after_body_move()
+            for tracker in qr_trackers.values(): tracker.after_move()
             handover.reset_follow()
             wait_seconds = DELIVERY_OBSERVE_SECONDS if planner.phase == 'DELIVER' else .5
             ready_at = time.monotonic()+wait_seconds

@@ -10,7 +10,8 @@ import time
 import cv2
 from robot_config import ROOT
 from competition_route import QRStepPlanner, RouteVision, BlueEntry, blue_ratios, run_course
-from carry_vision import find_blocks
+from carry_vision import find_blocks, steering
+from route_line import correction_action
 from competition_qr import read_codes
 from dual_kick import camera_settings
 
@@ -22,10 +23,12 @@ def load_settings(path):
     settings = json.loads(path.read_text(encoding="utf-8"))
     # 只限制会直接造成不合理运动的参数。
     counts = [settings[key] for key in (
-        "left_right_actions", "action1_right_actions", "delivery_search_right_actions",
+        "left_right_actions", "action1_right_actions", "delivery_search_right_actions", "delivery_right_actions",
         "after_sport_right_actions", "blue_extra_steps", "route_max_steps")]
     if any(type(count) is not int or not 0 <= count <= 30 for count in counts):
         raise ValueError("运动次数须为0至30的整数")
+    if settings["delivery_right_actions"] > 10:
+        raise ValueError("抱起后预转向最多10次，次数须现场测量")
     if not 0 < settings["total_seconds"] <= 480:
         raise ValueError("比赛总期限须在0至480秒之间")
     for key in ("face_head_position", "dance_head_position", "sport_head_position"):
@@ -102,10 +105,8 @@ def preflight(settings, use_original_drop=False):
                 or reference.get("target_qr") != settings["drop_qr"]
                 or "pickup" not in reference):
             problems.append("双摄搬运标定缺失或视图/目的地不匹配，请先恢复原相机配置并核对H标定")
-        if drop_reference(reference) is None and not use_original_drop:
-            problems.append("缺少有效125头位D投放参考；保留H，在实际放置位置保存D")
-        elif drop_reference(reference) is None:
-            print("[调试] 沿用H；缺D时按旧版二维码下沿57%放下，尚未验证实际投放位置。")
+        if drop_reference(reference) is None and drop_reference(reference,'head') is None:
+            problems.append("缺少有效腹部D或133头部J投放参考；保留H，在实际放置位置保存D")
     except (OSError, ValueError) as error:
         problems.append("搬运标定：" + str(error))
     try:
@@ -251,6 +252,20 @@ class CompetitionIO:
             self.observe_ready()
             self.move("UP_LITTLE")
 
+    def squat(self):
+        self.observe_ready()
+        self.move("SQUAT")
+
+    def stand(self):
+        self.observe_ready()
+        self.move("STAND")
+
+    def backward(self, count):
+        for _ in range(count):
+            # 每次后退前确认双摄仍在更新，动作后继续观察再执行下一步。
+            self.observe_ready()
+            self.move("BACK")
+
     def right(self, count):
         for _ in range(count):
             self.observe_ready()
@@ -276,11 +291,12 @@ class CompetitionIO:
                                 min(self.deadline, time.monotonic() + self.settings["route_timeout_seconds"]))
         print("寻找完整二维码：", content, "相机：", camera, flush=True)
         candidate_paused = False
+        line_checked_at_step = 0
         if self.stream is not None:
             self.stream.watch(content, camera, confirm_frames=confirm_frames)
         try:
             while True:
-                _, _, codes = self.observe()
+                _, belly, codes = self.observe()
                 ready = time.monotonic() >= self.ready_at
                 action = planner.decide([text for text, _ in codes[camera]], time.monotonic(), ready=ready)
                 if (time.monotonic() < planner.deadline and ready and self.stream is not None
@@ -303,11 +319,38 @@ class CompetitionIO:
                 if action == "STOP":
                     raise RuntimeError("寻找" + content + "超出步数或期限")
                 if action == "UP_LITTLE":
+                    # 每前进3小步检查一次；一次最多纠正一个动作，之后恢复扫码。
+                    if planner.steps and planner.steps % 3 == 0 and line_checked_at_step != planner.steps:
+                        line_checked_at_step = planner.steps
+                        if self.correct_line(belly, camera):
+                            continue
                     planner.mark_step()
                     self.move(action)
         finally:
             if self.stream is not None:
                 self.stream.watch(None, None)
+
+    def correct_line(self, belly, camera):
+        # 只在腹部扫码的普通路段使用；头部找dance时不纠偏。
+        if camera != "belly":
+            return False
+        action = correction_action(belly)
+        if action is None:
+            return False
+        _, next_belly, codes = self.observe()
+        # 二维码优先；两幅新画面给出相同方向才纠正。
+        if self.stream is not None and self.stream.saw_candidate():
+            return True  # 本轮不前进，回到扫码确认。
+        if correction_action(next_belly) != action:
+            return False
+        flip = camera_settings()["belly"]["flip"]
+        if action.startswith("SIDE_"):
+            action = steering(action, flip)
+        elif flip in ("1", "-1"):
+            action = "TURN_RIGHT" if action == "TURN_LEFT" else "TURN_LEFT"
+        print("[路线纠偏]", action, flush=True)
+        self.move(action)
+        return True
 
     def identity(self):
         self.stop_route()
@@ -324,6 +367,7 @@ class CompetitionIO:
         from carry_vision import run
         if not run(color, target, actions=True, robot=self.robot,
                    search_right_actions=self.settings["delivery_search_right_actions"], deadline=self.deadline,
+                   delivery_right_actions=self.settings["delivery_right_actions"],
                    qr_reader=read_codes, use_original_drop=self.use_original_drop,
                    eyes=(self.head_eye, self.belly_eye), servo=self.servo):
             raise RuntimeError("搬运未完成，停止比赛")
@@ -394,10 +438,15 @@ def simulate(settings, color):
             count = self.settings["qr_confirm_frames"] if confirm_frames is None else confirm_frames
             print("[模拟观测]", camera, "连续识别", text, count, "次")
         def identity(self): print("[模拟识别] 姓名/性别及播报成功；不检验模型")
+        def squat(self): print("[模拟动作] SQUAT 单帧下蹲；保持蹲姿识别人脸")
+        def stand(self): print("[模拟动作] STAND 识别后站起，再转向")
         def forward(self, count): print("[模拟动作] UP_LITTLE ×", count)
+        def backward(self, count): print("[模拟动作] BACK ×", count, "；距离需现场确认")
         def right(self, count): print("[模拟动作] TURN_RIGHT ×", count, "；角度未验证")
         def left(self, count): print("[模拟动作] TURN_LEFT ×", count, "；转向，不是横移")
-        def carry(self, color, target): print("[模拟搬运]", color, "HOLD_BOX →", target, "→ DOWN_BOX")
+        def carry(self, color, target):
+            print("[模拟搬运]", color, "HOLD_BOX → RIGHT_HOLDBOX ×", settings["delivery_right_actions"],
+                  "→ 头部133/腹部扫码", target, "→ 接近对应相机投放参考 → DOWN_BOX；转角未实测")
         def sport(self): print("[模拟足球] 行走带球 → 连续确认球远离 → 停止；进球未验证")
         def set_head(self, position): print("[模拟头部]", position)
         def enter_blue(self): print("[模拟舞区] 近远蓝地连续确认 → 补偿步数", settings["blue_extra_steps"])
@@ -448,7 +497,7 @@ def main():
     parser.add_argument("--run", action="store_true")
     parser.add_argument("--actions", action="store_true")
     parser.add_argument("--use-original-drop", action="store_true",
-                        help="调试：缺D时沿用旧版二维码下沿规则放下，保留H标定")
+                        help="兼容旧命令；仍须有效腹部D，不再按二维码下沿直接放下")
     args = parser.parse_args()
     if sum((args.check, args.simulate, args.preview, args.calibrate_carry)) > 1:
         parser.error("check、simulate、preview、calibrate-carry只能选一种")
@@ -479,6 +528,8 @@ def main():
     from robotmove import RobotMove
     from robot_audio import configure
     configure()
+    from chinese_speech import warm_up
+    warm_up()  # 比赛计时和身体连接之前完成首次加载、合成。
     deadline = time.monotonic() + settings["total_seconds"]
     io = CompetitionIO(settings, None, deadline, use_original_drop=args.use_original_drop)
     try:

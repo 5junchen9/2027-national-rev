@@ -3,12 +3,34 @@ import types
 import queue
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 import numpy as np
 import roboteye
 
 
 class CameraTests(unittest.TestCase):
+    def test_usb_link_opens_resolved_index_but_preserves_configured_identity(self):
+        device = '/dev/v4l/by-id/usb-camera-video-index0'
+        camera = Mock()
+        with patch.object(roboteye.Path,'exists',return_value=True), \
+             patch.object(roboteye.Path,'resolve',return_value=Path('/dev/video1')), \
+             patch.object(roboteye.cv2,'VideoCapture',return_value=camera) as capture, \
+             patch.object(roboteye.RobotEye,'_warm_up',return_value=True), \
+             patch.dict('os.environ',{'ROBOT_CAMERA_FOURCC':'MJPG'}):
+            eye = roboteye.RobotEye(device=device,backend='usb')
+            self.assertEqual(eye.device,device)
+            capture.assert_called_once_with(1,roboteye.cv2.CAP_V4L2)
+            camera.set.assert_any_call(roboteye.cv2.CAP_PROP_FOURCC,roboteye.cv2.VideoWriter_fourcc(*'MJPG'))
+            eye.close()
+        camera.release.assert_called_once()
+
+    def test_missing_usb_link_never_guesses_a_camera_index(self):
+        device = '/dev/v4l/by-id/missing-video-index0'
+        with patch.object(roboteye.Path,'exists',return_value=False):
+            self.assertEqual(roboteye.usb_camera_source(device),device)
+        self.assertEqual(roboteye.usb_camera_source('1'),1)
+
     def test_latest_stream_discards_backlog_and_copies_frames(self):
         incoming=queue.Queue()
         camera=Mock()
