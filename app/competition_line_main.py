@@ -10,7 +10,8 @@ import cv2
 from robot_config import ROOT
 from competition_main import (CompetitionIO, GuardedRobot, BODY_PORT, CONFIG_FILE,
                               load_settings, preflight)
-from carry_vision import steering
+from carry_vision import steering, find_blocks
+from kick_shapes import overlap
 from dual_kick import camera_settings
 from line_search_route import detect_line, LinePlanner, run_course
 
@@ -22,38 +23,49 @@ class LineCompetitionIO(CompetitionIO):
         self.open_views()
         self.stream.watch(None, None)  # 不等待left和action1，也不让二维码触发转向。
         planner = LinePlanner()
-        forward_steps = 0
+        self.set_head(127)
+        block_frames = 0
+        previous_block = None
         deadline = min(self.deadline, time.monotonic() + self.settings["route_timeout_seconds"])
         for _ in range(self.settings["route_max_steps"]):
-            _, belly, _ = self.observe_ready()
+            head, belly, _ = self.observe_ready()
             if time.monotonic() >= deadline:
                 raise RuntimeError("寻线超时，停止比赛")
+            blocks = find_blocks(head, color)
+            block = max(blocks, key=lambda box: box.width * box.height) if blocks else None
+            if block is not None:
+                same_block = previous_block is not None and overlap(previous_block, block) > .3
+                block_frames = block_frames + 1 if same_block else 1
+                previous_block = block
+                # 出现候选时停步确认，由搬运模块继续找物和对位。
+                if block_frames >= 3:
+                    print("指定颜色物块连续确认3帧，转入搬运。", flush=True)
+                    return
+                continue
+            block_frames = 0
+            previous_block = None
             x = detect_line(belly, self.line_color, planner.previous_x)
             # 连续两幅新画面没线后才开始局部搜索。
             if x is None:
                 _, belly, _ = self.observe_ready()
                 x = detect_line(belly, self.line_color, planner.previous_x)
-            action = planner.decide(x, belly.shape[1])
+            far_x = detect_line(belly, self.line_color, x, band=(.55, .75))
+            flip = camera_settings()["belly"]["flip"]
+            action = planner.decide(x, belly.shape[1], far_x, mirrored=flip in ("1", "-1"))
             display = belly.copy()
             top = int(display.shape[0] * .8)
             cv2.line(display, (0, top), (display.shape[1]-1, top), (0, 255, 255), 2)
             if x is not None:
                 cv2.circle(display, (round(x), (top+display.shape[0])//2), 8, (0, 0, 255), 2)
+            if far_x is not None:
+                cv2.circle(display, (round(far_x), round(display.shape[0]*.65)), 8, (255, 0, 255), 2)
             cv2.putText(display, action, (10, 30), 0, .7, (0, 255, 0), 2)
             cv2.imshow("line search", display)
             if action == "STOP":
-                if forward_steps == 0:
-                    raise RuntimeError("尚未沿线前进，局部搜索仍无线路，停止比赛")
-                print("已沿线前进，出线后局部搜索无结果，转入物品搬运。", flush=True)
-                return
-            if action == "UP_LITTLE":
-                forward_steps += 1
+                raise RuntimeError("向右搜索4次仍未找到线或指定物块，停止比赛")
             print("[寻线]", action, "线位置：", x, flush=True)
-            flip = camera_settings()["belly"]["flip"]
             if action.startswith("SIDE_"):
                 action = steering(action, flip)
-            elif action.startswith("TURN_") and flip in ("1", "-1"):
-                action = "TURN_LEFT" if action == "TURN_RIGHT" else "TURN_RIGHT"
             self.move(action)
         raise RuntimeError("寻线超过动作上限，停止比赛")
 
@@ -67,6 +79,7 @@ def preview_line(settings, line_color):
         while True:
             _, belly, _ = io.observe()
             x = detect_line(belly, line_color, planner.previous_x)
+            far_x = detect_line(belly, line_color, x, band=(.55, .75))
             if x is not None:
                 planner.previous_x = x
             display = belly.copy()
@@ -74,6 +87,11 @@ def preview_line(settings, line_color):
             cv2.line(display, (0, top), (display.shape[1]-1, top), (0, 255, 255), 2)
             if x is not None:
                 cv2.circle(display, (round(x), (top+display.shape[0])//2), 8, (0, 0, 255), 2)
+            for fraction in (.55, .75):
+                y = round(display.shape[0] * fraction)
+                cv2.line(display, (0, y), (display.shape[1]-1, y), (255, 0, 255), 1)
+            if far_x is not None:
+                cv2.circle(display, (round(far_x), round(display.shape[0]*.65)), 8, (255, 0, 255), 2)
             cv2.putText(display, "NO LINE" if x is None else f"LINE x={x:.0f}",
                         (10, 30), 0, .7, (0, 255, 0), 2)
             cv2.imshow("line search", display)

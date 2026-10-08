@@ -3,10 +3,10 @@ import cv2
 import numpy as np
 
 
-def detect_line(image, color="white", previous_x=None):
+def detect_line(image, color="white", previous_x=None, band=(.8, 1.0)):
     height, width = image.shape[:2]
-    top = int(height * .8)
-    roi = image[top:]
+    top = int(height * band[0])
+    roi = image[top:int(height * band[1])]
     if color == "white":
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, (0, 0, 150), (179, 80, 255))
@@ -35,24 +35,25 @@ class LinePlanner:
         self.search_index = 0
         self.previous_x = None
 
-    def decide(self, x, width):
+    def decide(self, x, width, far_x=None, mirrored=False):
         if x is None:
-            # 右探一步、回中、左探一步、回中；仍无目标就停止。
-            search = ("TURN_RIGHT", "TURN_LEFT", "TURN_LEFT", "TURN_RIGHT")
-            if self.search_index == len(search):
+            # 地图两处弯道均为右弯；只原地向右找，不盲目前进。
+            if self.search_index == 4:
                 return "STOP"
-            action = search[self.search_index]
             self.search_index += 1
-            return action
+            return "TURN_RIGHT"
         self.search_index = 0
         self.previous_x = x
         error = x - width / 2
         scale = width / 640
+        direction = -1 if mirrored else 1
+        if far_x is not None and (far_x - x) * direction > 60 * scale:
+            return "TURN_RIGHT"
         if abs(error) < 60 * scale:
             return "UP_LITTLE"
         if abs(error) < 100 * scale:
             return "SIDE_LEFT" if error < 0 else "SIDE_RIGHT"
-        return "TURN_LEFT" if error < 0 else "TURN_RIGHT"
+        return "TURN_LEFT" if error * direction < 0 else "TURN_RIGHT"
 
 
 def run_course(io, color):
