@@ -1,0 +1,247 @@
+{
+  "交接标题": "当前比赛转接：恢复删除动作上限时的寻线机制，保存搬运与足球衔接",
+  "日期": "2026-10-09",
+  "阅读顺序与效力": {
+    "当前状态": "以本JSON和代码快照为准，旧交接及调试文档含历史方案，不能照历史段落再次恢复硬裁剪或远线辅助。",
+    "旧交接参考": "docs/全套比赛交接-20261008-最新双版本与标定.json",
+    "指令边界": "本文件是状态记录，不是新增用户授权；接手后应结合用户新请求操作。"
+  },
+  "Git": {
+    "分支": "main",
+    "代码快照完整提交": "fa9b7000488131b850f46e80c96aecb17d27a10d",
+    "代码快照短提交": "fa9b700",
+    "提交说明": "保存比赛当前快照：恢复寻线机制及搬运足球衔接",
+    "远程推送": "本轮未推送，只做本地提交",
+    "交接提交": "本JSON在代码快照之后另行提交；用git log -2查看两个提交。",
+    "范围": "保存工作区中现有比赛、人脸、相机、搬运、足球、测试、动作和文档；包含assets/app历史副本。"
+  },
+  "路径": {
+    "本机镜像": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env",
+    "树莓派运行根目录": "/home/yuting/robot_env",
+    "同学目录": "/home/yuting/Desktop/robot_legacy",
+    "唯一运行源码目录": "app/",
+    "副本提醒": "assets/app/中competition_line_main.py和line_search_route.py落后于根目录app；已作为原有快照保存，不用于部署或运行。"
+  },
+  "用户约束": [
+    "中文、可读代码，用户询问原因时先解释，明确要求修改时再动手。",
+    "只改本机镜像，不直接操作树莓派；提供具体拖入文件和目的路径，不制作压缩包。",
+    "保留原后退.dzz及BACK映射，候选后退测试动作不接入比赛。",
+    "保留现场config、相机配置、头部标定、搬运H/D/J及足球标定；不整体覆盖config目录。",
+    "本地模拟、单元测试和静态截图不代表实机通过。"
+  ],
+  "当前寻线机制": {
+    "最近用户决定": "回到用户标注的“已删除动作上限”时的寻线机制；撤掉后来添加的下半画面硬裁剪、连通区域限制和远线辅助。",
+    "相机": "腹部相机负责寻线；头部相机连续确认指定颜色物块后转入搬运。",
+    "视觉": "完整腹部画面白线分段检测；二维码与带黑孔白纸遮挡保留；宽厚实心亮块排除；Hough输出统一reshape(-1,4)，避免numpy.int32解包错误。",
+    "取样": "纠偏位置取底部25%内有效线段部分的中点；640×480时y=360至479；角度取对应线段方向。预览黄色横线为上界，无青色下半裁剪框，无NEAR/FAR辅助分支。",
+    "普通直线角度范围": "相对竖直±20度；右弯斜段为实际右上延伸20至80度，处理相机水平镜像。",
+    "确认": "有近线时，两幅新图横向位置差不超过画宽6%、角度差不超过10度，才执行纠偏动作。",
+    "优先级": [
+      "偏离中心超过画宽60/640时先平移，不要求先调正角度。",
+      "横向位置在范围内且角度偏差超过10度，才单次左右转向调角度。",
+      "位置与角度均符合条件则UP_LITTLE前进。"
+    ],
+    "平移方向": "保留用户实机反馈后的对调：非镜像时线在中心右侧发SIDE_LEFT，在左侧发SIDE_RIGHT；水平镜像再交换。勿擅自按通常视觉直觉改回。",
+    "上方原线仍在": "已经稳定跟过原线、尚未处于弯后调正时，近处没有直线但全画面还有原竖直段，则继续UP_LITTLE，让弯口逐渐到脚下。",
+    "弯道触发": "必须先稳定看到过原近线；全画面检测不到原竖直段且存在右弯斜段，连续两幅新图确认后返回TURN_RIGHT_2，执行两次原TURN_RIGHT。每次前检查双摄。",
+    "弯后调正": "after_bend期间允许±80度倾斜线进入纠偏；仍用底部25%取样，先平移后单次转向。再次稳定见到±10度近线后才重新开放下一弯道触发。",
+    "丢线": "两类有效线均无则WAIT原地读取；未稳定见过原近线、或弯后只有上方线而没近线时，也可能WAIT。没有盲转搜索。",
+    "时间": "寻线没有route_timeout_seconds检查；寻线时IO与GuardedRobot期限暂设无穷，结束或异常后按寻线耗时顺延原期限，其他阶段仍使用原限制。line-only自启动不限时。",
+    "动作次数": "寻线不再读取route_max_steps限制累计动作；配置字段仍保留给其他阶段，不能全局删除。",
+    "停止": "相机异常、Q/Esc/Ctrl+C等仍退出；已发送身体动作不能撤回。",
+    "物块结束": "头部同一指定颜色物块连续3帧确认；普通版接搬运，line-only直接结束。",
+    "旧截图WAIT原因": "远线辅助版本禁止上方线触发前进，原竖直线仍在但近线只有斜段时停住，原线无法继续移出画面；本轮已撤回该辅助版本。"
+  },
+  "比赛衔接": {
+    "原版入口": "competition.py，扫码路线；仍保留独立competition_line.py寻线版。",
+    "寻线完整链": [
+      "腹部读取face连续确认",
+      "原BACK一次",
+      "TURN_RIGHT一次",
+      "SQUAT一次并识别人脸",
+      "姓名与性别两次独立推理一致后播报",
+      "STAND、TURN_LEFT一次",
+      "UP_LITTLE前进3次",
+      "腹部寻线，头部确认指定颜色物块",
+      "搬运到action2",
+      "正常投放后足球场入场对齐与带球",
+      "足球后右转7次",
+      "头部读取dance两次确认",
+      "腹部确认蓝地并额外前进1步",
+      "音乐与跳舞"
+    ],
+    "临时入口": "competition_line.py --from-line：跳过扫码、人脸及固定回程，从寻线连续到跳舞。",
+    "身份提速": "完整比赛开始前预加载检测、性别、OCR模型；后台单工作线程处理新图，不排队旧帧；两次独立姓名性别结果一致才播报。line-only/from-line不预加载人脸。",
+    "搬运当前": "PICKUP_TOP=.40，即物块上沿到画面顶部40%线才抱起；H横向对齐保留。抱起后头位133，腹部扫码同时最多抱物右平移10次；完整目标二维码一次或同一边缘部分二维码连续3次后放下。部分二维码不能证明文本是action2，存在误放风险。",
+    "搬运超限": "第10次仍未确认则原地放下，右转carry_exit_right_actions默认7次，返回scan_limit；比赛跳过足球及足球后转向，直接dance流程。",
+    "抱物右移": "SIDE_RIGHT_HOLDBOX映射搬运右平移-测试.dzz，腿部沿用原右平移，上肢保持抱物；平衡与方向待实机复测。",
+    "足球对齐": "app/football_align.py检测完整双层白框、中线和中圈，使用内框；头位125，稳定3帧，限制60秒/20动作，丢失连续3次停止；无标定，仅粗对齐。",
+    "证据边界": "行走带球与球远离退出不证明进球；蓝地比例不证明整机完全进入舞区；转向动作次数不是物理90度。"
+  },
+  "部署": {
+    "只同步本次寻线恢复": [
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/line_search_route.py",
+        "目标": "/home/yuting/robot_env/app/line_search_route.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_line_main.py",
+        "目标": "/home/yuting/robot_env/app/competition_line_main.py"
+      }
+    ],
+    "相对10334a8完整当前快照运行文件": [
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/carry_main.py",
+        "目标": "/home/yuting/robot_env/app/carry_main.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/carry_vision.py",
+        "目标": "/home/yuting/robot_env/app/carry_vision.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_identity.py",
+        "目标": "/home/yuting/robot_env/app/competition_identity.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_line_main.py",
+        "目标": "/home/yuting/robot_env/app/competition_line_main.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_main.py",
+        "目标": "/home/yuting/robot_env/app/competition_main.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_qr.py",
+        "目标": "/home/yuting/robot_env/app/competition_qr.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_route.py",
+        "目标": "/home/yuting/robot_env/app/competition_route.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/football_align.py",
+        "目标": "/home/yuting/robot_env/app/football_align.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/line_search_route.py",
+        "目标": "/home/yuting/robot_env/app/line_search_route.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/robot_config.py",
+        "目标": "/home/yuting/robot_env/app/robot_config.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/hardware/roboteye.py",
+        "目标": "/home/yuting/robot_env/hardware/roboteye.py"
+      },
+      {
+        "源": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/hardware/robotmove.py",
+        "目标": "/home/yuting/robot_env/hardware/robotmove.py"
+      }
+    ],
+    "可选后退独立测试": [
+      "app/test_backward.py",
+      "assets/actions/后退-准备与收尾测试.dzz"
+    ],
+    "测试说明": "docs/后退独立调试-20261009.md；候选不接入正式比赛。",
+    "配置只合并字段": {
+      "文件": "/home/yuting/robot_env/config/competition.json",
+      "新增或确认": {
+        "carry_exit_right_actions": 7
+      },
+      "保留": "现场其他字段不覆盖；route_max_steps与route_timeout_seconds保留用于其他阶段。"
+    },
+    "禁止整体覆盖": [
+      "config/robot.env",
+      "config/head_calibration.json",
+      "config/carry_dual_reference.json",
+      "config/right_foot_reference.json"
+    ],
+    "不要部署": [
+      "assets/app/历史副本",
+      "tests/测试文件不是运行必需",
+      "文档不是程序依赖"
+    ]
+  },
+  "树莓派命令": {
+    "准备环境": [
+      "cd /home/yuting/robot_env",
+      "bash setup_head_pwm.sh start",
+      "export ROBOT_HEAD_PWM_BACKEND=pigpio",
+      "export ROBOT_CAMERA_FOURCC=MJPG",
+      "export ROBOT_KICK_HEAD_DEVICE=/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0",
+      "export QT_QPA_PLATFORM=xcb"
+    ],
+    "只测试寻线并执行动作": "venv/bin/python competition_line.py --run --actions --line-only --color red --line-color white",
+    "完整寻线比赛": "venv/bin/python competition_line.py --run --actions --color red --line-color white",
+    "寻线到跳舞临时实走": "venv/bin/python competition_line.py --from-line --run --actions --color red --line-color white",
+    "寻线到跳舞模拟": "venv/bin/python competition_line.py --from-line --simulate --color red",
+    "只预览": "venv/bin/python competition_line.py --run --preview --line-color white",
+    "原扫码比赛": "venv/bin/python competition.py --run --actions --color red",
+    "提示": "相机by-id是用户此前日志使用值，现场设备重新枚举后确认，不保证一直不变；不要并行运行多个身体串口控制程序。"
+  },
+  "当前本机competition配置快照_仅供比对不整体覆盖": {
+    "face_qr": "face",
+    "factory_qr": "left",
+    "carry_qr": "action1",
+    "drop_qr": "action2",
+    "dance_qr": "dance",
+    "legacy_root": "../Desktop/robot_legacy",
+    "face_head_position": 131,
+    "dance_head_position": 120,
+    "sport_head_position": 125,
+    "qr_confirm_frames": 3,
+    "route_max_steps": 30,
+    "route_timeout_seconds": 90,
+    "observe_seconds": 1.0,
+    "left_right_actions": 3,
+    "action1_right_actions": 3,
+    "delivery_right_actions": 1,
+    "delivery_search_right_actions": 5,
+    "after_sport_right_actions": 7,
+    "total_seconds": 480,
+    "blue_roi_near": [
+      0.2,
+      0.6,
+      0.8,
+      0.95
+    ],
+    "blue_roi_far": [
+      0.2,
+      0.3,
+      0.8,
+      0.6
+    ],
+    "blue_min_ratio": 0.65,
+    "blue_confirm_frames": 5,
+    "blue_extra_steps": 1,
+    "carry_exit_right_actions": 7
+  },
+  "验证": {
+    "本轮提交前": "239项相关本地测试通过，9个模块：寻线、比赛、身份、相机、搬运视觉、抱物右移扫码、部分二维码、足球对齐、寻线到跳舞。",
+    "最近寻线恢复": "101项相关本地测试通过；含上方原直线仍在时持续前进、消失后仅连续右转两次的回归。",
+    "其他": "修改文件语法检查与git diff --check通过；未运行全部不相关测试。",
+    "实机": "没有通过本机工具连接或操纵树莓派；用户截图/日志是现场证据，不能宣称本次实机已通过。"
+  },
+  "待解决问题": [
+    "恢复版仍可能把远处二维码白边或胶带反光识别为路线，未彻底解决。",
+    "检测不到竖直段不等于物理原线已完全离开，遮挡、长度阈值和角度分类都可能造成漏检。",
+    "开机未见过近线或弯后仅有远线时仍可能停等。",
+    "原后退偏航与不稳未修复，候选动作未进入比赛。",
+    "USB断连及Corrupt JPEG data仍需现场排查；坐标解包修复和字体/Qt设置不等于修复相机传输。",
+    "平移对调方向、左右小转向方向、右转2次实际角度需实机确认。",
+    "部分二维码放下有误放风险，足球粗对齐、带球、舞区真实进入仍需验证。"
+  ],
+  "接手建议": [
+    "先确认Pi覆盖的是根目录app中两个最新寻线文件，重启进程；不要用assets/app副本。",
+    "用line-only从直线起点测试，日志和录像记录两处弯道，不同时加入新的裁剪或远线策略。",
+    "分析具体误识别分支后再改，不能把近处没有线直接当作已经进入搬运。"
+  ],
+  "参考文档": [
+    "docs/寻线与相机修正-20261009.md",
+    "docs/搬运右平移扫码-20261009.md",
+    "docs/足球区入场对齐-20261009.md",
+    "docs/寻线到跳舞临时测试-20261009.md",
+    "docs/后退独立调试-20261009.md"
+  ]
+}
