@@ -13,8 +13,8 @@ from competition_main import (CompetitionIO, GuardedRobot, BODY_PORT, CONFIG_FIL
 from carry_vision import find_blocks, BlockTracker
 from kick_shapes import overlap
 from dual_kick import camera_settings
-from line_search_route import (line_mask, route_segments, near_line_sample,
-                               LinePlanner, run_course, run_from_line)
+from line_search_route import (line_mask, effective_line_mask, route_segments,
+                               near_line_sample, LinePlanner, run_course, run_from_line)
 
 
 class LineCompetitionIO(CompetitionIO):
@@ -66,14 +66,19 @@ class LineCompetitionIO(CompetitionIO):
             previous_block = None
             mask = line_mask(belly, self.line_color)
             flip = camera_settings()["belly"]["flip"]
-            vertical, diagonal = route_segments(mask, mirrored=flip in ("1", "-1"),
+            original_vertical, _ = route_segments(mask, mirrored=flip in ("1", "-1"))
+            route_mask = effective_line_mask(mask)
+            vertical, diagonal = route_segments(route_mask, mirrored=flip in ("1", "-1"),
                                                 recovering=planner.after_bend)
             x, angle = near_line_sample(vertical, belly.shape[0], belly.shape[1],
                                         planner.previous_x)
             action = planner.decide(x, belly.shape[1], right_diagonal=bool(diagonal),
                                     angle=angle, mirrored=flip in ("1", "-1"),
-                                    original_visible=bool(vertical))
+                                    original_visible=bool(original_vertical))
             display = belly.copy()
+            route_top = round(belly.shape[0]*.5)
+            cv2.rectangle(display, (0,route_top),
+                          (belly.shape[1]-1,belly.shape[0]-1), (255,255,0), 2)
             sample_top = round(belly.shape[0]*.75)
             cv2.line(display, (0,sample_top), (belly.shape[1]-1,sample_top), (0,255,255), 2)
             for segments, paint in ((vertical,(0,255,0)),(diagonal,(0,165,255))):
@@ -83,8 +88,9 @@ class LineCompetitionIO(CompetitionIO):
             cv2.putText(display, f"vertical={len(vertical)} diagonal={len(diagonal)} angle={angle:.1f}",
                         (10,60),0,.7,(0,255,0),2)
             cv2.imshow("line search", display)
-            cv2.imshow("line mask", mask)
-            print("[寻线]", action, "全画面竖直段：", len(vertical),
+            cv2.imshow("line mask", route_mask)
+            print("[寻线]", action, "全画面竖直段：", len(original_vertical),
+                  "有效区直线段：", len(vertical),
                   "右弯斜段：", len(diagonal), "仅斜线确认：", planner.diagonal_frames,
                   "角度：", round(angle,1), "弯后调正：", planner.after_bend, flush=True)
             if action == "WAIT":
@@ -110,14 +116,19 @@ def preview_line(settings, line_color):
             _, belly, _ = io.observe()
             mask = line_mask(belly, line_color)
             flip = camera_settings()["belly"]["flip"]
-            vertical, diagonal = route_segments(mask, mirrored=flip in ("1", "-1"),
+            original_vertical, _ = route_segments(mask, mirrored=flip in ("1", "-1"))
+            route_mask = effective_line_mask(mask)
+            vertical, diagonal = route_segments(route_mask, mirrored=flip in ("1", "-1"),
                                                 recovering=planner.after_bend)
             x, angle = near_line_sample(vertical, belly.shape[0], belly.shape[1],
                                         planner.previous_x)
             action = planner.decide(x, belly.shape[1], right_diagonal=bool(diagonal),
                                     angle=angle, mirrored=flip in ("1", "-1"),
-                                    original_visible=bool(vertical))
+                                    original_visible=bool(original_vertical))
             display = belly.copy()
+            route_top = round(belly.shape[0]*.5)
+            cv2.rectangle(display, (0,route_top),
+                          (belly.shape[1]-1,belly.shape[0]-1), (255,255,0), 2)
             sample_top = round(belly.shape[0]*.75)
             cv2.line(display, (0,sample_top), (belly.shape[1]-1,sample_top), (0,255,255), 2)
             for segments,paint in ((vertical,(0,255,0)),(diagonal,(0,165,255))):
@@ -127,7 +138,7 @@ def preview_line(settings, line_color):
             cv2.putText(display,f"vertical={len(vertical)} diagonal={len(diagonal)} angle={angle:.1f}",
                         (10,60),0,.7,(0,255,0),2)
             cv2.imshow("line search", display)
-            cv2.imshow("line mask", mask)
+            cv2.imshow("line mask", route_mask)
     finally:
         io.close_views()
         cv2.destroyAllWindows()

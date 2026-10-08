@@ -33,6 +33,7 @@ ACTIONS = {
     "DOWN_BOX": ("松.dzz", 1),
     "UP_HOLDBOX": ("搬运行走.dzz", 1),
     "LEFT_HOLDBOX": ("搬运左转.dzz", 1),
+    "SIDE_RIGHT_HOLDBOX": ("搬运右平移-测试.dzz", 1),
     "RIGHT_HOLDBOX": ("搬运右转-补齐收尾.dzz", 1),
     "LEFT_BALL": ("L踢球.dzz", 1),
     "RIGHT_BALL": ("R踢球.dzz", 1),

@@ -72,6 +72,20 @@ def detect_line(image, color="white", previous_x=None, band=(.8, 1.0), mask=None
     return min(candidates, key=lambda x: abs(x - anchor))
 
 
+def effective_line_mask(mask):
+    """寻线只看下半画面，并保留延伸到脚下取样区的连通白线。"""
+    height = mask.shape[0]
+    filtered = mask.copy()
+    filtered[:round(height*.5)] = 0
+    # 连通区域表示像素相连的一段白线，远处孤立白边不参与纠偏和弯道触发。
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(filtered, connectivity=8)
+    for label in range(1, count):
+        bottom = stats[label, cv2.CC_STAT_TOP]+stats[label, cv2.CC_STAT_HEIGHT]
+        if bottom <= round(height*.75):
+            filtered[labels == label] = 0
+    return filtered
+
+
 def route_segments(mask, mirrored=False, recovering=False):
     """在整个腹部画面分开找竖直段和向实际右方延伸的斜段。"""
     height, width = mask.shape

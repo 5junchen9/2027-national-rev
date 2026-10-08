@@ -256,7 +256,8 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual(planner.decide(pickup,1),'WAIT')
         self.assertEqual(planner.decide(pickup,2),'HOLD_BOX')
         planner.reset_confirmation()
-        self.assertEqual([planner.decide(box,frames) for frames in (1,2)],['WAIT','UP_LITTLE'])
+        below = Box(.4,.41,.2,.2)
+        self.assertEqual([planner.decide(below,frames) for frames in (1,2)],['WAIT','UP_LITTLE'])
         planner.phase = 'DELIVER';planner.reset_confirmation()
         drop = Box(.4,.3,.2,.2)
         self.assertEqual([planner.decide(drop,frames) for frames in range(1,4)],
@@ -473,7 +474,7 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual(self.confirmed_action(planner,Box(.43,.43,.1,.1)),'UP_LITTLE')
         self.assertEqual(self.confirmed_action(planner,Box(.4,.7,.1,.1)),'UP_LITTLE')
 
-    def test_logged_98_8_percent_bottom_keeps_approaching_until_top_line(self):
+    def test_logged_98_8_percent_bottom_now_reaches_sixty_percent_pickup_line(self):
         for reference in (
             dict(pickup=[.278125,.1604166667,.446875,.55625]),
             dict(pickup=[.278125,.1604166667,.446875,.55625],
@@ -482,16 +483,15 @@ class CarryVisionTests(unittest.TestCase):
             with self.subTest(reference=reference):
                 planner = CarryPlanner(reference,'none')
                 logged = Box(.3,.262,.4,.726)
-                self.assertEqual(self.confirmed_action(planner,logged),'UP_LITTLE')
-                planner.mark_sent('UP_LITTLE')
-                self.assertEqual(planner.belly_approach_steps,1)
+                self.assertEqual(self.confirmed_action(planner,logged),'HOLD_BOX')
+                self.assertEqual(planner.belly_approach_steps,0)
                 # 完整框的下沿仍未出画，但上沿到线后应抱；不再依赖旧H下沿。
                 at_line = Box(.3,.20,.4,.788)
                 self.assertEqual(self.confirmed_action(planner,at_line),'HOLD_BOX')
 
     def test_full_box_approach_keeps_six_step_limit_and_waits_on_missing_target(self):
         planner = CarryPlanner(self.reference(),'none')
-        below = Box(.3,.262,.4,.726)
+        below = Box(.3,.41,.4,.58)
         for _ in range(6):
             self.assertEqual(self.confirmed_action(planner,below),'UP_LITTLE')
             planner.mark_sent('UP_LITTLE')
@@ -1038,11 +1038,11 @@ class CarryVisionTests(unittest.TestCase):
                          ['UP_LITTLE']*4+['HOLD_BOX','DOWN_BOX'])
         self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[130,133,133])
 
-    def test_pickup_line_at_upper_20_percent_boundary(self):
+    def test_pickup_line_at_upper_40_percent_boundary(self):
         reference = self.reference()
-        self.assertEqual(carry_vision.pickup_action(Box(.3,.20,.4,.80),reference,'none'),'HOLD_BOX')
-        self.assertEqual(carry_vision.pickup_action(Box(.3,.21,.4,.79),reference,'none'),'UP_LITTLE')
-        self.assertEqual(carry_vision.pickup_action(Box(.3,.19,.4,.81),reference,'none'),'HOLD_BOX')
+        self.assertEqual(carry_vision.pickup_action(Box(.3,.40,.4,.60),reference,'none'),'HOLD_BOX')
+        self.assertEqual(carry_vision.pickup_action(Box(.3,.41,.4,.59),reference,'none'),'UP_LITTLE')
+        self.assertEqual(carry_vision.pickup_action(Box(.3,.39,.4,.61),reference,'none'),'HOLD_BOX')
         self.assertEqual(carry_vision.follow_head_angle(Box(.3,.6,.4,.2),123),129)
         self.assertEqual(carry_vision.follow_head_angle(Box(.3,.1,.4,.2),123),120)
         self.assertEqual(carry_vision.follow_head_angle(Box(.3,.4,.4,.2),123),123)
@@ -1438,7 +1438,7 @@ class CarryVisionTests(unittest.TestCase):
         servo.is_moving.return_value=False
         def blocks(image,color,near=False):
             # 已发一个搜索小步后出现未稳定方块，立即停止新的头部搜索。
-            return [Box(288,150,64,48)] if servo.begin_vertical.call_count else []
+            return [Box(288,220,64,48)] if servo.begin_vertical.call_count else []
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'carry_dual_reference.json'
             path.write_text(json.dumps(dict(version=2,cameras=settings,head_position=121,target_qr='DROP',

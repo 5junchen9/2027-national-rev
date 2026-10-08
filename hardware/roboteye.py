@@ -187,7 +187,7 @@ class RobotEye:
                 camera = _CsiCamera(source, self.fps)
             else:
                 camera = cv2.VideoCapture(source, backend)
-                if not camera.isOpened() and backend != cv2.CAP_ANY:
+                if not camera.isOpened() and os.name != "posix" and backend != cv2.CAP_ANY:
                     camera.release()
                     camera = cv2.VideoCapture(source)
             if camera.isOpened() and self.backend == "usb":
@@ -226,17 +226,24 @@ class RobotEye:
 
     def _warm_up(self):
         """至少预热一秒并取得连续有效帧，避开启动绿屏和乱条。"""
+        if not self.__camera.isOpened():
+            return False
         started = time.monotonic()
         deadline = started + 2.5
         valid_frames = 0
+        failed_frames = 0
         while time.monotonic() < deadline:
             ok, frame = self.__camera.read()
             if ok and frame is not None and frame.size:
+                failed_frames = 0
                 valid_frames += 1
                 if valid_frames >= 5 and time.monotonic() - started >= 1.0:
                     return True
             else:
                 valid_frames = 0
+                failed_frames += 1
+                if failed_frames >= 3:
+                    return False  # 不对已掉线设备持续读到预热超时。
             time.sleep(0.02)
         return False
 

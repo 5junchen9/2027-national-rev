@@ -10,6 +10,28 @@ import roboteye
 
 
 class CameraTests(unittest.TestCase):
+    def test_closed_usb_is_not_read_and_linux_does_not_fallback_to_other_backend(self):
+        camera=Mock()
+        camera.isOpened.return_value=False
+        with patch.object(roboteye.cv2,'VideoCapture',return_value=camera) as capture, \
+             patch.object(roboteye.time,'sleep'), patch.object(roboteye.os,'name','posix'):
+            with self.assertRaisesRegex(RuntimeError,'摄像头初始化失败'):
+                roboteye.RobotEye(device='1',backend='usb')
+        camera.read.assert_not_called()
+        self.assertEqual(capture.call_count,2)
+        self.assertEqual(camera.release.call_count,2)
+
+    def test_warmup_stops_after_three_failed_reads_and_releases_camera(self):
+        camera=Mock()
+        camera.isOpened.return_value=True
+        camera.read.return_value=(False,None)
+        with patch.object(roboteye.cv2,'VideoCapture',return_value=camera), \
+             patch.object(roboteye.time,'sleep'):
+            with self.assertRaisesRegex(RuntimeError,'摄像头初始化失败'):
+                roboteye.RobotEye(device='1',backend='usb')
+        self.assertEqual(camera.read.call_count,6)
+        self.assertEqual(camera.release.call_count,2)
+
     def test_usb_link_opens_resolved_index_but_preserves_configured_identity(self):
         device = '/dev/v4l/by-id/usb-camera-video-index0'
         camera = Mock()

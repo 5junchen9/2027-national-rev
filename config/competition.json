@@ -22,5 +22,6 @@
   "blue_roi_far": [0.2, 0.3, 0.8, 0.6],
   "blue_min_ratio": 0.65,
   "blue_confirm_frames": 5,
-  "blue_extra_steps": 1
+  "blue_extra_steps": 1,
+  "carry_exit_right_actions": 7
 }
