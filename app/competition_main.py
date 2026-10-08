@@ -22,15 +22,13 @@ def load_settings(path):
     settings = json.loads(path.read_text(encoding="utf-8"))
     # 只限制会直接造成不合理运动的参数。
     counts = [settings[key] for key in (
-        "after_sber_steps", "sber_right_actions", "action1_right_actions",
-        "delivery_search_right_actions", "after_return_steps",
+        "left_right_actions", "action1_right_actions", "delivery_search_right_actions",
         "after_sport_right_actions", "blue_extra_steps", "route_max_steps")]
-    counts += list(settings["return_right_actions"].values())
     if any(type(count) is not int or not 0 <= count <= 30 for count in counts):
         raise ValueError("运动次数须为0至30的整数")
     if not 0 < settings["total_seconds"] <= 480:
         raise ValueError("比赛总期限须在0至480秒之间")
-    for key in ("face_head_position", "dance_head_position"):
+    for key in ("face_head_position", "dance_head_position", "sport_head_position"):
         if not 85 <= settings[key] <= 180:
             raise ValueError(key + "超出头部指令范围")
     for key in ("qr_confirm_frames", "blue_confirm_frames"):
@@ -98,13 +96,14 @@ def preflight(settings, use_original_drop=False):
     settings_cameras = camera_settings()
     try:
         reference = json.loads((ROOT / "config/carry_dual_reference.json").read_text())
+        from carry_vision import drop_reference, reference_for_target
+        reference = reference_for_target(reference,settings["drop_qr"])
         if (reference.get("version") not in (2, 3) or reference.get("cameras") != settings_cameras
                 or reference.get("target_qr") != settings["drop_qr"]
                 or "pickup" not in reference):
             problems.append("双摄搬运标定缺失或视图/目的地不匹配，请先恢复原相机配置并核对H标定")
-        from carry_vision import drop_reference
         if drop_reference(reference) is None and not use_original_drop:
-            problems.append("缺少有效120头位D投放参考；保留H，在实际放置位置保存D")
+            problems.append("缺少有效125头位D投放参考；保留H，在实际放置位置保存D")
         elif drop_reference(reference) is None:
             print("[调试] 沿用H；缺D时按旧版二维码下沿57%放下，尚未验证实际投放位置。")
     except (OSError, ValueError) as error:
@@ -113,7 +112,7 @@ def preflight(settings, use_original_drop=False):
         from handover_debug import validate
         head = json.loads((ROOT / "config/head_calibration.json").read_text())
         foot = json.loads((ROOT / "config/right_foot_reference.json").read_text())
-        head["forward"] = 129
+        head["forward"] = settings["sport_head_position"]
         validate(head, foot, settings_cameras)
     except (OSError, ValueError) as error:
         problems.append("足球标定：" + str(error))
@@ -205,8 +204,8 @@ class CompetitionIO:
                                   self.settings["qr_confirm_frames"])
         self.flush()
 
-    def resume_route(self):
-        self.servo.turn_vertical(129)
+    def resume_route(self, position=129):
+        self.servo.turn_vertical(position)
         self.head_eye.discard_frames(1)
         self.belly_eye.discard_frames(1)
         self.start_route()
@@ -269,15 +268,16 @@ class CompetitionIO:
             if time.monotonic() >= self.ready_at:
                 return frames
 
-    def scan_until(self, content, camera):
+    def scan_until(self, content, camera, confirm_frames=None):
         self.open_views()
-        planner = QRStepPlanner(content, self.settings["qr_confirm_frames"],
+        confirm_frames = self.settings["qr_confirm_frames"] if confirm_frames is None else confirm_frames
+        planner = QRStepPlanner(content, confirm_frames,
                                 self.settings["route_max_steps"],
                                 min(self.deadline, time.monotonic() + self.settings["route_timeout_seconds"]))
         print("寻找完整二维码：", content, "相机：", camera, flush=True)
         candidate_paused = False
         if self.stream is not None:
-            self.stream.watch(content, camera)
+            self.stream.watch(content, camera, confirm_frames=confirm_frames)
         try:
             while True:
                 _, _, codes = self.observe()
@@ -286,6 +286,10 @@ class CompetitionIO:
                 if (time.monotonic() < planner.deadline and ready and self.stream is not None
                         and self.stream.saw_target()):
                     action = "DONE"
+                elif (action in ("UP_LITTLE", "STOP") and time.monotonic() < planner.deadline
+                      and self.stream is not None
+                      and self.stream.waiting_for_decode()):
+                    action = "WAIT"
                 elif (action in ("UP_LITTLE", "STOP") and time.monotonic() < planner.deadline
                       and self.stream is not None and self.stream.saw_candidate()):
                     # 行走期间首次读到目标后，原地等待完整确认，不继续跨过路标。
@@ -323,12 +327,13 @@ class CompetitionIO:
                    qr_reader=read_codes, use_original_drop=self.use_original_drop,
                    eyes=(self.head_eye, self.belly_eye), servo=self.servo):
             raise RuntimeError("搬运未完成，停止比赛")
-        self.resume_route()
+        self.resume_route(self.settings["sport_head_position"])
 
     def sport(self):
         self.stop_route()
         from handover_debug import run
-        if not run(fps=camera_settings()["head"]["fps"], actions=True, robot=self.robot,
+        if not run(forward=self.settings["sport_head_position"],
+                   fps=camera_settings()["head"]["fps"], actions=True, robot=self.robot,
                    deadline=self.deadline, eyes=(self.head_eye, self.belly_eye), servo=self.servo):
             raise RuntimeError("足球阶段未完成，停止比赛")
         self.resume_route()
@@ -385,7 +390,9 @@ def simulate(settings, color):
         def __init__(self):
             self.settings = settings
         def phase(self, name): print("[模拟阶段]", name)
-        def scan_until(self, text, camera): print("[模拟观测]", camera, "连续识别", text)
+        def scan_until(self, text, camera, confirm_frames=None):
+            count = self.settings["qr_confirm_frames"] if confirm_frames is None else confirm_frames
+            print("[模拟观测]", camera, "连续识别", text, count, "次")
         def identity(self): print("[模拟识别] 姓名/性别及播报成功；不检验模型")
         def forward(self, count): print("[模拟动作] UP_LITTLE ×", count)
         def right(self, count): print("[模拟动作] TURN_RIGHT ×", count, "；角度未验证")

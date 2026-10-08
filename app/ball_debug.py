@@ -180,10 +180,10 @@ class PatchTracker:
         hsv = cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
         # Search yellow-green and true-green in separate bands. Combining the
         # whole family at once can join a tennis ball to wood/cyan background.
-        # 自动黄绿色检测带排除偏黄褐色地面；手动采色仍用现场颜色。
-        minimum_hue = 30 if self.hue < 55 and not self.manual else 24
-        low,high = max(minimum_hue,self.hue-self.hue_width),min(85,self.hue+self.hue_width)
-        strong = cv2.inRange(hsv,(low,self.min_s,self.min_v),(high,255,255))
+        # 放宽偏黄、暗光球面；保留圆形、圆弧和背景差异筛选。
+        low = max(28 if self.hue < 55 and not self.manual else 24,self.hue-self.hue_width)
+        high = min(85,self.hue+self.hue_width)
+        strong = cv2.inRange(hsv,(low,min(self.min_s,45),min(self.min_v,80)),(high,255,255))
         # Pale yellow still has a color hint; plain white is only considered near
         # a previously identified ball, never as a whole-image acquisition rule.
         pale = cv2.inRange(hsv,(low,12,max(160,self.min_v)),(high,255,255))

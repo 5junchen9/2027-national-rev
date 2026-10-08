@@ -1,5 +1,6 @@
 """比赛路标和蓝地判定，不连接硬件。"""
 import cv2
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
 
@@ -18,12 +19,16 @@ class RouteVision:
         self.reached = False
         self.candidate_seen = False
         self.error = None
+        self.decoding = False
         self.thread = threading.Thread(target=self.capture, daemon=True)
         self.thread.start()
 
-    def watch(self, expected, camera):
+    def watch(self, expected, camera, confirm_frames=None):
         with self.condition:
             self.expected, self.camera = expected, camera
+            self.decoding = expected is not None
+            if confirm_frames is not None:
+                self.confirm_frames = confirm_frames
             self.frames = 0
             self.reached = False
             self.candidate_seen = False
@@ -40,32 +45,49 @@ class RouteVision:
         with self.condition:
             self.delivered = self.sequence
 
+    def waiting_for_decode(self):
+        with self.condition:
+            return self.decoding
+
     def capture(self):
+        # 只有一个解码任务；忙时持续读新画面，不排队旧帧。
         try:
-            while not self.stopped.is_set():
-                okh, head = self.head_eye.getImage()
-                okb, belly = self.belly_eye.getImage()
-                if not okh or not okb:
-                    raise RuntimeError('比赛双摄读取失败')
-                # 路标阶段只解码指定相机；不让另一相机的增强解码拖慢路标判断。
-                with self.condition:
-                    expected, camera = self.expected, self.camera
-                codes = {'head': [], 'belly': []}
-                if expected is not None:
-                    codes[camera] = self.decode(head if camera == 'head' else belly)
-                with self.condition:
-                    if expected is not None and (expected, camera) == (self.expected, self.camera):
-                        contents = [text for text, _ in codes[self.camera]]
-                        self.frames = self.frames+1 if contents.count(self.expected) == 1 else 0
-                        if contents.count(self.expected) == 1:
-                            self.candidate_seen = True
-                        if self.frames >= self.confirm_frames:
-                            # 记住动作期间扫到的路标，不要求动作结束后仍在画面内。
-                            self.reached = True
-                    self.latest = (head, belly, codes)
-                    self.received_at = time.monotonic()
-                    self.sequence += 1
-                    self.condition.notify_all()
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                pending = None
+                job = None
+                while not self.stopped.is_set():
+                    okh, head = self.head_eye.getImage()
+                    okb, belly = self.belly_eye.getImage()
+                    if not okh or not okb:
+                        raise RuntimeError('比赛双摄读取失败')
+                    captured_at = time.monotonic()
+                    with self.condition:
+                        expected, camera = self.expected, self.camera
+                    codes = {'head': [], 'belly': []}
+                    if pending is None and expected is not None:
+                        job = (expected, camera)
+                        image = head if camera == 'head' else belly
+                        pending = worker.submit(self.decode,image.copy())
+                    if pending is not None and pending.done():
+                        decoded = pending.result()
+                        pending = None
+                        with self.condition:
+                            if job == (self.expected,self.camera):
+                                codes[job[1]] = decoded
+                                contents = [text for text, _ in decoded]
+                                matched = contents.count(job[0]) == 1
+                                self.frames = self.frames+1 if matched else 0
+                                if matched:
+                                    self.candidate_seen = True
+                                if self.frames >= self.confirm_frames:
+                                    self.reached = True
+                    with self.condition:
+                        self.decoding = self.expected is not None and (
+                            pending is not None or job != (self.expected,self.camera))
+                        self.latest = (head, belly, codes)
+                        self.received_at = captured_at
+                        self.sequence += 1
+                        self.condition.notify_all()
         except Exception as error:
             with self.condition:
                 self.error = error
@@ -148,30 +170,26 @@ def run_course(io, color):
     settings = io.settings
     io.phase("寻找face")
     io.scan_until(settings["face_qr"], "belly")
-    io.phase("人脸前小步左转")
-    io.left(1)
+    io.phase("人脸前小步右转")
+    io.right(1)
     io.phase("姓名和性别识别")
     io.identity()
-    io.phase("人脸完成后小步右转回路线")
-    io.right(1)
-    io.phase("寻找sber")
+    io.phase("人脸完成后小步左转回路线")
+    io.left(1)
+    io.phase("寻找left")
     io.scan_until(settings["factory_qr"], "belly")
-    io.forward(settings["after_sber_steps"])
-    io.right(settings["sber_right_actions"])
+    io.right(settings["left_right_actions"])
     io.phase("寻找action1")
     io.scan_until(settings["carry_qr"], "belly")
     io.right(settings["action1_right_actions"])
     io.phase("指定颜色搬运")
     io.carry(color, settings["drop_qr"])
-    io.phase("返回赛道")
-    io.right(settings["return_right_actions"][color])
-    io.forward(settings["after_return_steps"])
-    io.phase("足球")
+    io.phase("action2投放完成，开始足球")
     io.sport()
     io.right(settings["after_sport_right_actions"])
     io.phase("头部寻找dance")
     io.set_head(settings["dance_head_position"])
-    io.scan_until(settings["dance_qr"], "head")
+    io.scan_until(settings["dance_qr"], "head", confirm_frames=2)
     io.phase("腹部确认蓝色舞区")
     io.enter_blue()
     io.phase("音乐和舞蹈")

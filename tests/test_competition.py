@@ -1,7 +1,9 @@
 import json
+from concurrent.futures import Future
 from pathlib import Path
 import tempfile
 import threading
+import time
 import types
 import unittest
 from unittest.mock import Mock, patch
@@ -15,6 +17,54 @@ from competition_identity import choose_face, recognize, load_source, load_model
 
 
 class CompetitionTests(unittest.TestCase):
+    def test_route_waits_while_decoding_then_walks_after_empty_result(self):
+        io=CompetitionIO(self.settings(),Mock(),float('inf'))
+        io.open_views=Mock();io.ready_at=0
+        io.observe=Mock(return_value=(None,None,{'belly':[]}))
+        io.stream=Mock()
+        io.stream.saw_target.side_effect=[False,False,True]
+        io.stream.saw_candidate.return_value=False
+        io.stream.waiting_for_decode.side_effect=[True,False]
+        io.move=Mock()
+        io.scan_until('left','belly')
+        self.assertEqual(io.observe.call_count,3)
+        io.move.assert_called_once_with('UP_LITTLE')
+
+    def test_simulation_completes_new_route_with_dance_confirmation_override(self):
+        with patch('builtins.print'):
+            self.assertTrue(competition_main.simulate(self.settings(),'blue'))
+
+    def test_slow_qr_decode_keeps_fresh_preview_and_does_not_queue(self):
+        frame=np.zeros((100,100,3),np.uint8)
+        head,belly=Mock(),Mock()
+        def read_head():
+            time.sleep(.01)
+            return True,frame
+        head.getImage.side_effect=read_head
+        belly.getImage.return_value=(True,frame)
+        started,release=threading.Event(),threading.Event()
+        def slow_decode(image):
+            started.set()
+            if not release.wait(3): raise RuntimeError('test decoder not released')
+            return [('dance',None)]
+        decode=Mock(side_effect=slow_decode)
+        stream=RouteVision(head,belly,decode,3)
+        try:
+            stream.watch('dance','head',confirm_frames=2)
+            self.assertTrue(started.wait(1))
+            for _ in range(5):
+                self.assertEqual(stream.read()[0].shape,frame.shape)
+                self.assertTrue(stream.waiting_for_decode())
+                self.assertFalse(stream.saw_target())
+            self.assertEqual(decode.call_count,1)
+        finally:
+            release.set();stream.close()
+
+    def immediate_decode(self, function, image):
+        future = Future()
+        future.set_result(function(image))
+        return future
+
     def settings(self):
         return load_settings(competition_main.CONFIG_FILE)
 
@@ -61,15 +111,15 @@ class CompetitionTests(unittest.TestCase):
             io.dance.assert_called_once()
             io.carry.assert_called_once_with(color, io.settings['drop_qr'])
             self.assertEqual([(call.args[0], call.args[1]) for call in io.scan_until.call_args_list],
-                             [('face', 'belly'), ('sber', 'belly'), ('action1', 'belly'), ('dance', 'head')])
+                             [('face', 'belly'), ('left', 'belly'), ('action1', 'belly'), ('dance', 'head')])
 
     def test_failed_identity_never_enters_carry_or_dance(self):
         io = Mock();io.settings = self.settings()
         io.identity.side_effect = RuntimeError('identity failed')
         with self.assertRaises(RuntimeError): run_course(io, 'blue')
         io.carry.assert_not_called();io.sport.assert_not_called();io.dance.assert_not_called()
-        io.left.assert_called_once_with(1)
-        io.right.assert_not_called()
+        io.right.assert_called_once_with(1)
+        io.left.assert_not_called()
 
     def test_actual_qr_loop_holds_at_candidate(self):
         io = CompetitionIO(self.settings(), Mock(), float('inf'))
@@ -94,7 +144,9 @@ class CompetitionTests(unittest.TestCase):
             return True, frame
         belly.getImage.side_effect = belly_read
         stream.watch('face', 'belly')
-        stream.capture()
+        with patch('competition_route.ThreadPoolExecutor') as pool:
+            pool.return_value.__enter__.return_value.submit.side_effect = self.immediate_decode
+            stream.capture()
         self.assertTrue(stream.saw_target())
         self.assertTrue(stream.saw_candidate())
         self.assertEqual(decode.call_count,4)  # 仅腹部解码，不再每轮双摄各解码一次。
@@ -109,6 +161,7 @@ class CompetitionTests(unittest.TestCase):
         io.open_views = Mock();io.ready_at = 0
         io.stream = Mock()
         io.stream.saw_target.side_effect = [False,True]
+        io.stream.waiting_for_decode.return_value = False
         io.stream.saw_candidate.return_value = True
         io.observe = Mock(return_value=(None,None,{'belly':[]}))
         io.move = Mock()
@@ -130,7 +183,10 @@ class CompetitionTests(unittest.TestCase):
             if reads==2: stream.stopped.set()
             return True,frame
         belly.getImage.side_effect=read_belly
-        stream.watch('sber','belly');stream.capture()
+        stream.watch('sber','belly')
+        with patch('competition_route.ThreadPoolExecutor') as pool:
+            pool.return_value.__enter__.return_value.submit.side_effect = self.immediate_decode
+            stream.capture()
         self.assertTrue(stream.saw_candidate())
         self.assertFalse(stream.saw_target())
         self.assertEqual(stream.frames,0)
@@ -204,21 +260,24 @@ class CompetitionTests(unittest.TestCase):
                 getattr(io, later).assert_not_called()
 
     def test_complete_route_uses_exact_markers_color_return_and_one_dance(self):
-        for color, count in [('red', 2), ('blue', 3), ('yellow', 5)]:
+        for color in ('red','blue','yellow'):
             io = Mock();io.settings = self.settings()
-            io.settings['return_right_actions'][color] = count
             self.assertTrue(run_course(io, color))
             self.assertEqual([call.args for call in io.scan_until.call_args_list],
-                             [('face', 'belly'), ('sber', 'belly'),
+                             [('face', 'belly'), ('left', 'belly'),
                               ('action1', 'belly'), ('dance', 'head')])
-            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 3, 4, count, 7])
+            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 3, 4, 7])
             io.left.assert_called_once_with(1)
-            self.assertEqual([call.args[0] for call in io.forward.call_args_list], [1, 1])
+            self.assertEqual([call.args[0] for call in io.forward.call_args_list], [])
             calls = [call[0] for call in io.method_calls]
             carry_index = calls.index('carry')
             self.assertEqual(calls[carry_index-2:carry_index], ['right', 'phase'])
             io.carry.assert_called_once_with(color, io.settings['drop_qr'])
             io.dance.assert_called_once()
+            self.assertEqual(io.scan_until.call_args_list[-1].kwargs,dict(confirm_frames=2))
+            self.assertEqual(io.settings['drop_qr'],'action2')
+            self.assertEqual(io.settings['sport_head_position'],125)
+            self.assertEqual(calls[carry_index+1:carry_index+3],['phase','sport'])
 
     def test_face_turns_are_single_turn_actions_around_identity(self):
         from robotmove import ACTIONS
@@ -228,7 +287,7 @@ class CompetitionTests(unittest.TestCase):
         run_course(io,'blue')
         calls = [call for call in io.method_calls if call[0] != 'phase']
         self.assertEqual([call[0] for call in calls[:5]],
-                         ['scan_until','left','identity','right','scan_until'])
+                         ['scan_until','right','identity','left','scan_until'])
 
     def test_time_guard_rejects_motion_before_sending(self):
         robot = Mock()
@@ -347,6 +406,7 @@ class CompetitionTests(unittest.TestCase):
             for stage in (carry,sport):
                 self.assertEqual(stage.call_args.kwargs['eyes'],(head,belly))
                 self.assertIs(stage.call_args.kwargs['servo'],servo)
+            self.assertEqual(sport.call_args.kwargs['forward'],125)
             self.assertEqual(factory.call_count,2)
             io.close_views()
         head.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
@@ -485,7 +545,7 @@ class CompetitionTests(unittest.TestCase):
         module = types.SimpleNamespace(decode=decoder,ZBarSymbol=types.SimpleNamespace(QRCODE='QR'))
         with patch.dict('sys.modules',{'pyzbar':types.ModuleType('pyzbar'),'pyzbar.pyzbar':module}):
             self.assertEqual(read_codes(np.zeros((100,100,3),np.uint8)),[])
-        self.assertEqual(decoder.call_count,3)
+        self.assertEqual(decoder.call_count,4)
 
     def check_shared_carry(self, shared=False):
         import carry_vision
@@ -503,7 +563,7 @@ class CompetitionTests(unittest.TestCase):
         robot.robotMove.side_effect = moved
         reference = dict(version=2, cameras=camera_settings(), head_position=129,
                          target_qr='action2', shapes=dict(head=[480, 640], belly=[480, 640]),
-                         pickup=[.4, .5, .1, .1], drop=[.4, .3, .2, .2], drop_head_position=120)
+                         pickup=[.4, .5, .1, .1], drop=[.4, .3, .2, .2], drop_head_position=125)
         factory = Mock()
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'carry.json';path.write_text(json.dumps(reference))

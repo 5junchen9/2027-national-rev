@@ -12,6 +12,9 @@ def qr_images(frame):
     binary = cv2.adaptiveThreshold(enlarged,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY,31,5)
     yield binary,2
+    # 光照不均时补一次局部对比度增强；仍只接受真正解码出的文本。
+    enhanced = cv2.createCLAHE(clipLimit=2.0,tileGridSize=(8,8)).apply(gray)
+    yield enhanced,1
 
 
 def read_codes(frame):

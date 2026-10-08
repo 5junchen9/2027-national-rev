@@ -6,6 +6,12 @@ from ball_debug import PatchTracker
 
 
 class BallDebugTests(unittest.TestCase):
+    def test_dim_yellow_ball_passes_wider_color_thresholds(self):
+        hsv=np.zeros((240,320,3),np.uint8)
+        cv2.circle(hsv,(160,120),30,(29,50,90),-1)
+        tracker=PatchTracker()
+        self.assertIsNotNone(tracker.update(cv2.cvtColor(hsv,cv2.COLOR_HSV2BGR)))
+        self.assertGreater(tracker.score,.55)
     def test_edge_green_floor_and_rectangles_are_not_balls(self):
         for box in ((0,0,639,280),(0,40,639,350),(0,0,180,479)):
             frame=np.zeros((480,640,3),np.uint8)

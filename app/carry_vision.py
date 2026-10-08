@@ -15,7 +15,7 @@ from handover_debug import Handover
 from ball_debug import distinct_from_background
 
 INITIAL_HEAD_POSITION = 123
-DELIVERY_HEAD_POSITION = 120
+DELIVERY_HEAD_POSITION = 125
 TRACK_FRAMES = 2
 PICKUP_FRAMES = 2
 FINAL_FRAMES = 5  # 保存标定仍确认5帧。
@@ -505,8 +505,20 @@ def steering(action, flip):
     return action
 
 
+def reference_for_target(reference, target_qr):
+    """H与目的地文本无关；换目的地只在内存中弃用旧D，不写现场文件。"""
+    if reference is None:
+        return None
+    reference = dict(reference)
+    if reference.get('target_qr') != target_qr:
+        reference.pop('drop',None)
+        reference.pop('drop_head_position',None)
+        reference['target_qr'] = target_qr
+    return reference
+
+
 def drop_reference(reference):
-    """只接受120头位、完整画面内的D参考，不用默认横线代替投放位置。"""
+    """只接受125头位、完整画面内的D参考，不用默认横线代替投放位置。"""
     if not reference or reference.get('drop_head_position') != DELIVERY_HEAD_POSITION:
         return None
     values = reference.get('drop')
@@ -577,7 +589,7 @@ class CarryPlanner:
                     action = 'DOWN_BOX'
                 self.reason = f'original drop rule: QR bottom={box.bottom:.0%}; '+action
             elif target is None:
-                self.reason = 'STOP: valid D placement reference at head120 required'
+                self.reason = 'STOP: valid D placement reference at head125 required'
                 return 'STOP'
             else:
                 return self.decide_placement(box,stable_frames,target,decoded)
@@ -655,13 +667,14 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
     settings = camera_settings()
     reference = json.loads(REFERENCE_FILE.read_text()) if REFERENCE_FILE.exists() else None
     if actions:
+        reference = reference_for_target(reference,target_qr)
         if (reference is None or reference.get('version') not in (2,3)
                 or reference.get('cameras') != settings
                 or reference.get('target_qr') != target_qr
                 or 'pickup' not in reference):
-            raise ValueError('双摄配置或H参考不匹配，请先恢复原相机配置并核对H；实际投放还需120头位D参考')
+            raise ValueError('双摄配置或H参考不匹配，请先恢复原相机配置并核对H；实际投放还需125头位D参考')
         if drop_reference(reference) is None and not use_original_drop:
-            raise ValueError('实际投放需要120头位的D参考：在物块实际应放下的位置保存D；保留已有H标定')
+            raise ValueError('实际投放需要125头位的D参考：在物块实际应放下的位置保存D；保留已有H标定')
     planner = CarryPlanner(reference,settings['belly']['flip'],use_original_drop) if actions else None
     handover = Handover(dict(forward=INITIAL_HEAD_POSITION,down_sign=1,
                              bounds=[HEAD_SEARCH_MIN,HEAD_SEARCH_MAX]))
@@ -700,7 +713,7 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
         ready_at = time.monotonic()+.5
         print('目标颜色:',color,'目的地二维码:',target_qr)
         print('候选显示score总分、C颜色分、S形状分；这是匹配评分，不是识别概率。')
-        print('H=123头位/保存腹部抱取位置；D=120头位/保存二维码放下位置；Q=退出。')
+        print('H=123头位/保存腹部抱取位置；D=125头位/保存二维码放下位置；Q=退出。')
         print('腹部确认后独占接近控制；旧位置失配时单个强目标稳定3帧重新确认。H可保存局部参考。')
         print('未确认腹部候选不阻断可靠头部靠近；抱取完成后仅头部二维码识别参与动作，腹部仅预览。')
         print('接近、腹部接手和抱起确认2帧；放下确认3帧，保存参考仍确认5帧。')
@@ -715,7 +728,7 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
         if use_original_drop and drop_reference(reference) is None:
             print('调试沿用H：缺D时使用旧版下沿60%参考，提前3%触发、目标二维码解码确认3帧；实际投放位置尚未验证。')
         else:
-            print('在实机确认适合放下的位置保存D，头位120；已有正确D可沿用。缺D不启用身体搬运。')
+            print('在实机确认适合放下的位置保存D，头位125；已有正确D可沿用。缺D不启用身体搬运。')
         while True:
             if deadline is not None and time.monotonic() >= deadline:
                 print('比赛总期限到达，停止搬运');return False
@@ -776,7 +789,7 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                         cv2.rectangle(display,(int(box.x),int(box.y)),(int(box.x+box.width),int(box.bottom)),(255,255,0),2)
                         cv2.putText(display,content,(int(box.x),max(15,int(box.y)-5)),0,.5,(255,255,0),1)
                 phase = planner.phase if actions else 'PREVIEW'
-                reason = planner.reason if actions else 'H=pickup at 123; D=QR drop at 120; Q=quit'
+                reason = planner.reason if actions else 'H=pickup at 123; D=QR drop at 125; Q=quit'
                 cv2.putText(display,f'{phase} {handover.phase} color={color} head={handover.angle}',(8,25),0,.5,(255,255,255),1)
                 if name == 'belly' and bottom_clipped and not local_pickup and not actions:
                     reason = 'partial block: H can save visible pickup region'
@@ -948,7 +961,7 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
             if action == 'DOWN_BOX':
                 print('放下动作已执行；物块是否实际到位需要现场确认。');return True
             if action == 'HOLD_BOX':
-                # 抱取完成后抬头到120，重新识别目的地二维码。
+                # 抱取完成后调整到125，重新识别目的地二维码。
                 handover.phase = 'HEAD'
                 handover.angle = DELIVERY_HEAD_POSITION;servo.begin_vertical(DELIVERY_HEAD_POSITION)
             head_eye.discard_frames(1);belly_eye.discard_frames(1)

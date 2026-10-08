@@ -14,6 +14,14 @@ from dual_kick import camera_settings
 
 
 class CarryVisionTests(unittest.TestCase):
+    def test_new_destination_reuses_h_but_does_not_reuse_or_overwrite_old_d(self):
+        original=dict(target_qr='OLD',**self.reference())
+        changed=carry_vision.reference_for_target(original,'action2')
+        self.assertEqual(changed['pickup'],original['pickup'])
+        self.assertEqual(changed['target_qr'],'action2')
+        self.assertIsNone(carry_vision.drop_reference(changed))
+        self.assertIsNotNone(carry_vision.drop_reference(original))
+        self.assertEqual(original['target_qr'],'OLD')
     def test_original_h_trial_approaches_and_requires_exact_decode_to_release(self):
         reference = dict(pickup=[.4,.5,.1,.1])
         planner = CarryPlanner(reference,'none',use_original_drop=True)
@@ -58,7 +66,7 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual([planner.decide(box,3) for _ in range(3)],['WAIT','WAIT','DOWN_BOX'])
 
     def test_invalid_or_missing_d_prevents_camera_and_body_startup(self):
-        for changes in ({'drop_head_position':129}, {'drop':None}, {'drop':[.4,.3,0,.2]}):
+        for changes in ({'drop_head_position':120}, {'drop_head_position':129}, {'drop':None}, {'drop':[.4,.3,0,.2]}):
             with self.subTest(changes=changes),tempfile.TemporaryDirectory() as folder:
                 reference = dict(version=3,cameras=camera_settings(),target_qr='DROP',
                                  shapes=dict(head=[480,640],belly=[480,640]),**self.reference())
@@ -258,7 +266,7 @@ class CarryVisionTests(unittest.TestCase):
                 sent = [call.args[0] for call in robot.robotMove.call_args_list]
                 self.assertEqual(sent, ['UP_LITTLE','HOLD_BOX','DOWN_BOX'] if clipped_belly else ['UP_LITTLE']*4)
                 self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],
-                                 [120] if clipped_belly else [129,135,140])
+                                 [125] if clipped_belly else [129,135,140])
 
     def test_transfer_crosses_missing_head_view_then_belly_grasps_and_delivers(self):
         hf=np.zeros((480,640,3),np.uint8);bf=hf.copy()
@@ -287,7 +295,7 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE','UP_LITTLE','HOLD_BOX','DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],120)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_qr_search_budget_resets_after_target_returns(self):
@@ -321,7 +329,7 @@ class CarryVisionTests(unittest.TestCase):
             path=Path(folder)/'carry.json'
             path.write_text(json.dumps(dict(version=3,cameras=camera_settings(),head_position=121,
                                            target_qr='DROP',shapes=dict(head=[480,640],belly=[480,640]),
-                                           pickup=[.4,.5,.1,.1],drop=[.4,.7,.2,.2],drop_head_position=120)))
+                                           pickup=[.4,.5,.1,.1],drop=[.4,.7,.2,.2],drop_head_position=125)))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
                  patch.object(carry_vision,'block_quality',return_value=(1.0,1.0)), \
                  patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
@@ -334,7 +342,7 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['HOLD_BOX']+['RIGHT_HOLDBOX']*2+['UP_HOLDBOX']+['RIGHT_HOLDBOX']*3+['DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],120)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_visible_head_target_can_approach_five_steps_before_belly_takes_over(self):
@@ -364,7 +372,7 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE']*5+['HOLD_BOX','DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],120)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_small_low_head_target_does_not_trigger_blind_transfer_limit(self):
@@ -394,7 +402,7 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE']*5+['HOLD_BOX','DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],120)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_partial_reference_matches_only_current_local_region(self):
@@ -486,7 +494,7 @@ class CarryVisionTests(unittest.TestCase):
         reference=dict(version=3,cameras=camera_settings(),head_position=121,target_qr='DROP',
                        shapes=dict(head=[480,640],belly=[480,640]),pickup=[.3,.6,.3,.4],
                        pickup_mode='visible_region',pickup_clipped=[False,False,False,True],
-                       drop=[.4,.3,.2,.2],drop_head_position=120)
+                       drop=[.4,.3,.2,.2],drop_head_position=125)
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'carry.json';path.write_text(json.dumps(reference))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
@@ -501,7 +509,7 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
             self.assertEqual(json.loads(path.read_text()),reference)
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],['UP_LITTLE','HOLD_BOX','DOWN_BOX'])
-        servo.begin_vertical.assert_called_once_with(120)
+        servo.begin_vertical.assert_called_once_with(125)
 
     def test_head_move_keeps_identity_and_recovers_without_overlap(self):
         tracker=BlockTracker();box=Box(200,300,100,100)
@@ -580,7 +588,7 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE','HOLD_BOX','DOWN_BOX'])
-        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],120)
+        self.assertEqual(servo.begin_vertical.call_args_list[-1].args[0],125)
         self.assertTrue(all(85 <= call.args[0] <= 180 for call in servo.begin_vertical.call_args_list))
 
     def test_initial_scores_choose_blue_over_dark_blue_black_and_strip(self):
@@ -998,7 +1006,7 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertTrue(carry_vision.run('blue','DROP',actions=True,robot=robot))
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['UP_LITTLE']*4+['HOLD_BOX','DOWN_BOX'])
-        self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[126,129,120])
+        self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[126,129,125])
 
     def test_pickup_line_at_upper_20_percent_boundary(self):
         reference = self.reference()
@@ -1129,7 +1137,7 @@ class CarryVisionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'carry.json'
             path.write_text(json.dumps(dict(version=3,cameras=camera_settings(),target_qr='DROP',
-                shapes=dict(head=[480,640],belly=[480,640]),pickup=[.4,.5,.1,.1],drop=[.4,.35,.2,.3],drop_head_position=120)))
+                shapes=dict(head=[480,640],belly=[480,640]),pickup=[.4,.5,.1,.1],drop=[.4,.35,.2,.3],drop_head_position=125)))
             with patch.object(carry_vision,'REFERENCE_FILE',path), \
                  patch.object(carry_vision,'RobotEye',side_effect=[head,belly]), \
                  patch.object(carry_vision,'find_blocks',side_effect=lambda image,color,near=False:
@@ -1184,7 +1192,7 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual(self.confirmed_action(planner,Box(.49,.3,.1,.1)),'UP_HOLDBOX')
 
     def reference(self):
-        return dict(pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2],drop_head_position=120)
+        return dict(pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2],drop_head_position=125)
 
     def confirmed_action(self, planner, box):
         for _ in range(5): action=planner.decide(box,5)
@@ -1251,7 +1259,7 @@ class CarryVisionTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text()),reference)
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],['UP_LITTLE','HOLD_BOX','UP_HOLDBOX','DOWN_BOX'])
         servo.turn_vertical.assert_called_once_with(123)
-        servo.begin_vertical.assert_called_with(120)
+        servo.begin_vertical.assert_called_with(125)
         robot.close.assert_called_once();servo.cleanup.assert_called_once();eye.close.assert_called_once();belly.close.assert_called_once()
 
     def test_missing_reference_does_not_open_camera_or_serial(self):
@@ -1299,7 +1307,7 @@ class CarryVisionTests(unittest.TestCase):
                 self.assertFalse(carry_vision.run('blue','DROP'))
             reference=json.loads(path.read_text())
         self.assertEqual(reference['version'],3)
-        self.assertEqual(reference['drop_head_position'],120)
+        self.assertEqual(reference['drop_head_position'],125)
         self.assertEqual(reference['pickup'],[.4,.5,.1,.1])
         self.assertEqual(reference['drop'],[.4,.3,.2,.2])
         self.assertEqual(reference['shapes'],dict(head=[240,320],belly=[480,640]))
