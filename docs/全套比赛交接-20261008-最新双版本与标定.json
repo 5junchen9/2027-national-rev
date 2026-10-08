@@ -1,0 +1,306 @@
+{
+  "交接标题": "比赛当前完整交接：原扫码版、独立寻线版、斜视投放与蓝色物块",
+  "日期": "2026-10-08",
+  "快照代码提交": "87cf1e8",
+  "证据边界": {
+    "修改范围": "本机镜像，不等于已部署到树莓派",
+    "验证": "最新188项本地测试通过，含模拟和合成图像，不代表真实比赛完成",
+    "用户已确认": "单帧蹲姿取景测试成功，最终头位131；早前双摄可读腹部action2并保存",
+    "尚待实测": [
+      "两处右弯寻线",
+      "反光及二维码干扰抑制",
+      "头部小范围追踪和OCR正确率",
+      "蓝地蓝物块误检漏检",
+      "斜视D/J及真实落点",
+      "完整比赛衔接"
+    ]
+  },
+  "当前用户约束": [
+    "中文、可读代码、保留旧动作和标定",
+    "原competition.py入口不替换；另有competition_line.py",
+    "人脸后退一步，右转一次，单帧下蹲识别，站起后左转",
+    "姓名缺失允许继续；不放宽相机故障和比赛期限",
+    "寻线不使用left/action1，两处弯道均右弯",
+    "最新寻线不再丢线直接搬运，改为确认指定颜色物块",
+    "参考同学寻线代码，但不改同学目录",
+    "头部物块搜索127，投放action2头位133，人脸131并±6追踪"
+  ],
+  "路径": {
+    "本机镜像": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env",
+    "树莓派": "/home/yuting/robot_env",
+    "同学代码本机": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/Desktop/robot_legacy",
+    "同学代码树莓派": "/home/yuting/Desktop/robot_legacy",
+    "原交接保留": "docs/全套比赛交接-20261008.json",
+    "本文件": "docs/全套比赛交接-20261008-最新双版本与标定.json",
+    "重要": "旧交接含124/125头位、action1右转4次、首次有效就播报等过时信息，以本文件和当前代码为准"
+  },
+  "Git记录": {
+    "分支": "main",
+    "提交仅本地": "本轮没有推送远程",
+    "提交列表": [
+      {
+        "提交": "e5e6757",
+        "内容": "原比赛流程快照：后退一步、单帧蹲姿、131头位"
+      },
+      {
+        "提交": "d255b9a",
+        "内容": "新增独立寻线入口"
+      },
+      {
+        "提交": "ab2d143",
+        "内容": "右弯提前观察，丢线右搜索，确认物块后搬运"
+      },
+      {
+        "提交": "293071e",
+        "内容": "修复摄像头路径末尾0，保存pigpio和MJPG"
+      },
+      {
+        "提交": "5b72b3b",
+        "内容": "头部追踪、局部OCR、多次确认、失败继续、寻线抗干扰"
+      },
+      {
+        "提交": "87cf1e8",
+        "内容": "蓝色盒面边缘、统一跟踪、二维码四角与斜视投放"
+      }
+    ]
+  },
+  "完整配置competition_json": {
+    "face_qr": "face",
+    "factory_qr": "left",
+    "carry_qr": "action1",
+    "drop_qr": "action2",
+    "dance_qr": "dance",
+    "legacy_root": "../Desktop/robot_legacy",
+    "face_head_position": 131,
+    "dance_head_position": 120,
+    "sport_head_position": 125,
+    "qr_confirm_frames": 3,
+    "route_max_steps": 30,
+    "route_timeout_seconds": 90,
+    "observe_seconds": 1.0,
+    "left_right_actions": 3,
+    "action1_right_actions": 3,
+    "delivery_right_actions": 1,
+    "delivery_search_right_actions": 5,
+    "after_sport_right_actions": 7,
+    "total_seconds": 480,
+    "blue_roi_near": [
+      0.2,
+      0.6,
+      0.8,
+      0.95
+    ],
+    "blue_roi_far": [
+      0.2,
+      0.3,
+      0.8,
+      0.6
+    ],
+    "blue_min_ratio": 0.65,
+    "blue_confirm_frames": 5,
+    "blue_extra_steps": 1
+  },
+  "部署": {
+    "根目录新增": [
+      "competition_line.py"
+    ],
+    "app目录更新或新增": [
+      "competition_main.py",
+      "competition_route.py",
+      "competition_identity.py",
+      "identity_tools.py",
+      "chinese_speech.py",
+      "carry_vision.py",
+      "competition_qr.py",
+      "route_line.py",
+      "competition_line_main.py",
+      "line_search_route.py",
+      "blue_block_edges.py",
+      "qr_geometry.py",
+      "test_face_squat.py"
+    ],
+    "hardware目录更新": [
+      "robotmove.py",
+      "roboteye.py"
+    ],
+    "动作文件": [
+      "assets/actions/人脸识别下蹲-测试.dzz",
+      "assets/actions/抱低处物块-减小前倾测试.dzz",
+      "assets/actions/搬运右转-补齐收尾.dzz"
+    ],
+    "本轮相对上一版最少同步": [
+      "app/carry_vision.py",
+      "app/competition_qr.py",
+      "app/competition_line_main.py",
+      "app/qr_geometry.py",
+      "app/blue_block_edges.py"
+    ],
+    "competition_json": "已有最新配置则不用改；旧现场配置只合并face_head_position=131、action1_right_actions=3、delivery_right_actions=1及缺失字段，保留其他现场设置；不要整套覆盖",
+    "robot_env合并字段": {
+      "ROBOT_KICK_HEAD_DEVICE": "/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0",
+      "ROBOT_HEAD_PWM_BACKEND": "pigpio",
+      "ROBOT_CAMERA_FOURCC": "MJPG"
+    },
+    "不得覆盖": [
+      "config/carry_dual_reference.json",
+      "config/head_calibration.json",
+      "config/right_foot_reference.json",
+      "其他现场robot.env值和标定",
+      "同学robot_legacy源码"
+    ],
+    "说明": "从当前已部署版本增量同步；上面的全量清单只针对本次累计变化，不是新机器的完整安装包"
+  },
+  "硬件": {
+    "头部": "USB，by-id末尾必须index0；现场曾指向/dev/video1，重插后应重新核实，不写死编号1",
+    "腹部": "CSI，沿用现场设备索引和翻转配置",
+    "USB修复": "roboteye.py将存在的by-id链接解析为/dev/videoN并用编号打开；不存在或拼错的链接不会猜测替代",
+    "视频": "MJPG 640x480，现场协商30fps，程序请求15fps不等于相机实际15fps",
+    "舵机": "GPIO27，pigpio；setup_head_pwm.sh start只启动服务，不自动选择后端或转头",
+    "身体串口": "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0",
+    "动作语义": "RobotMove构造时自动STAND一次；close只关闭串口，不自动起身、放物或撤销已发送动作",
+    "现场提醒": "截图出现过低电压提示；Qt字体警告曾伴随正常预览，不等于摄像头初始化失败"
+  },
+  "两版共同流程": [
+    "预检依赖、标定、动作；声音预热后计时；双摄尺寸核对通过才启动身体，初始站立一次",
+    "腹部连续确认face三次 → BACK一次 → TURN_RIGHT一次 → SQUAT单帧下蹲",
+    "人脸131开始，125至137上下微调；局部姓名OCR＋FairFace性别；成功播报，否则60秒内未完成跳过",
+    "STAND站起 → TURN_LEFT一次 → 按各自路线进入搬运",
+    "指定颜色物块：头部127搜索并跟踪，腹部接手对位，HOLD_BOX抱起",
+    "头部133，按delivery_right_actions预右转一次；双摄寻找action2，按对应D/J靠近并放下",
+    "足球行走带球，观察球远离后停止；不等于已证明进球",
+    "右转7次 → 头位120找dance连续两次 → 腹部近远蓝地65%连续5帧 → 补前进1小步",
+    "播放音乐并DANCE1、3、4、5 → 结束"
+  ],
+  "原扫码版": {
+    "入口": "competition.py",
+    "人脸之后": "腹部找left，连续3次则右转3次；再找action1，连续3次则右转3次，再搬运",
+    "辅助纠偏": "普通腹部扫码前进每3小步看一次暗色区域；两图方向一致最多纠正一个动作，二维码优先",
+    "已知缺口": "left/action1只要求解码连续确认，没有距离门槛；远处码可能提前触发。此逻辑保留，不属于独立寻线版"
+  },
+  "独立寻线版": {
+    "入口": "competition_line.py",
+    "人脸之后": "不等待left/action1，不执行它们原来的转向；头部127观察物块，同时腹部寻线",
+    "线检测": "默认white；可--line-color black。近段底部80%-100%，远段55%-75%；近段红点、远段紫点",
+    "纠偏": "偏差小直行，中等平移，大则转向；远段相对近段向机器人右方偏60像素（按640宽缩放）提前右转",
+    "抗干扰": "定位二维码后遮挡，细长候选、区域高度支持、宽度限制，以及相邻位置跳变限制；不能保证排除所有细长反光",
+    "局部搜索": "连续两幅图无近段线后，最多4次原地右转，每次后读图；找回恢复，仍无线/物块则停止",
+    "右弯含义": "两处都右弯仅作为搜索方向先验，不是精确两次转向；4次动作不等于45度，也不推断两个弯已经走完",
+    "搬运触发": "BlockTracker颜色、形状、面积、关联评分通过后，同一指定颜色物块连续3帧确认；不以丢线为搬运入口",
+    "限制": "30轮、90秒及总比赛480秒；候选确认也占循环轮数"
+  },
+  "人脸细节": {
+    "姿态": "assets/actions/人脸识别下蹲-测试.dzz仅一帧；来自减小前倾抱物第一帧第8至24通道，第1至7通道偏移为0；不执行后续弯腰/抱物",
+    "追踪": "只上下头部，不动身体；131±6，每次1，间隔至少0.8秒；稳定后提交新推理，转头重置确认",
+    "OCR": "仅人脸下方局部，三倍插值；姓名2至4汉字，置信度至少80%，同一姓名性别组合在3次独立OCR中确认，缓存不重复计数；不回退全图文字",
+    "失败策略": "姓名/性别未确认或播报返回失败时跳过阶段；Q/Ctrl+C、读图故障、总时限仍停止",
+    "局限": "插值不能补回原图无笔画；没有姓名白名单或真实身份模型，高置信度仍可能认错"
+  },
+  "物块识别细节": {
+    "已有形状识别": "HSV连通区域的长宽比、填充率、凸包及多边形；是规则匹配，不是物体类别识别",
+    "新蓝色处理": "完整头部蓝色候选至少3边有独立图像边缘支持；增加边缘凸四边形候选，内部蓝色至少65%、盒面和周围Lab外观差异、尺寸长宽比限制；近处截断保留原跟踪",
+    "仍可能错误": "地面上的蓝色矩形图案外观像盒面也可能通过；盒子与地面完全同色同亮无边界可能漏检",
+    "抱取控制": "腹部接手后不再让头部找物控制前进；对齐后物块上沿到画面顶部20%线或更上方才抱；腹部接近最多6小步；视角/动作均需现场验证"
+  },
+  "action2投放细节": {
+    "头位": 133,
+    "优先级": "当前精确解码且稳定、具有对应投放标定的腹部优先，其次头部；另一视角无遮拦不等于能借用另一相机的尺寸参考",
+    "四角": "pyzbar或OpenCV解码保留四角，归一化保存；紫色四边形可见时表示本次画面带四角信息",
+    "视角检查": "四边长度除以平均边长，与对应相机实测参考比较，单边偏差允许0.18；不是三维位姿/绝对距离估计",
+    "调整": "偏离参考中心超过12%画面宽时允许先转向居中；居中仍不匹配就等待，不从透视猜横移方向",
+    "尺寸": "有四角时用两组对边平均长度比例，旧标定用外接矩形宽高；达到90%-120%，中心位置接近且3次新精确解码才放下；过近停止",
+    "无标定视角": "仅辅助转向；不能推算接近距离或直接放下",
+    "丢失": "保持并尝试5秒，之后有限搜索；总搬运300秒或40动作上限",
+    "旧标定": "不自动迁移，不伪造四角；旧D/J继续旧宽高方式，重新保存对应D/J才启用四角检查"
+  },
+  "标定详解": {
+    "核心答案": "不是固定规定45度或正面。按实际准备放下时的机器人身体朝向、持物姿态、位置、相机安装与牌子相对角度标定。实际若斜着接近并斜着投放，就在这个真实斜视角保存；实际若先调整到正面再投放，则在正面保存。",
+    "45度的区别": [
+      "场地图上路线转角45度",
+      "机器人身体朝向与二维码平面法线的夹角",
+      "相机画面里二维码的旋转/透视形状",
+      "头舵机133是控制值，不是二维码夹角。这些不能混为一谈。"
+    ],
+    "正面是否更好": "如果最终落点和动作允许，选择能完整稳定读码且便于放物的较正面视角通常更容易复现；不能为了拍正而偏离需要的落点或临时转牌子",
+    "不可这样做": [
+      "不要把立牌转正后标定再转回比赛角度",
+      "不要正面标定后让实跑以明显不同的侧视角强行接近",
+      "不要仅因二维码识别成功就保存，先确认真实放下动作的落点",
+      "不要为更新D/J按H覆盖既有抱取参考",
+      "不要在空手站姿保存投放参考，再指望持物姿态完全一致",
+      "不要假定右转一次就是45度"
+    ],
+    "先决条件": [
+      "同步最新代码，确保app/qr_geometry.py和blue_block_edges.py存在",
+      "关闭其他比赛、相机预览和动作程序，避免占相机或串口",
+      "核实USB by-id链接存在、双摄画面方向和分辨率匹配原H",
+      "保留相机翻转、安装位置和分辨率；若这些改变，需要重新审查相关标定，不能只更新D",
+      "空手准备抱取时做好防倒保护；已经抱着物块则跳过站立/抱取准备，避免松物或动作冲突"
+    ],
+    "H_D_J含义": {
+      "H": "腹部抱取参考，机器人在能成功抱起的空手对位姿态保存；当前已有效则保留",
+      "D": "腹部在真实持物、实际投放姿态下看到的action2；保存drop和drop_quad",
+      "J": "同一身体投放姿态，头位133看到的action2；保存drop_head、drop_head_quad和drop_head_position=133",
+      "Q": "退出，不自动放下或站起"
+    },
+    "备份命令": "cd /home/yuting/robot_env\ncp -n config/carry_dual_reference.json config/carry_dual_reference.before-quad.json",
+    "环境准备命令": "cd /home/yuting/robot_env\nbash setup_head_pwm.sh start\nexport ROBOT_HEAD_PWM_BACKEND=pigpio\nexport ROBOT_CAMERA_FOURCC=MJPG\nexport ROBOT_KICK_HEAD_DEVICE=/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0",
+    "单独抱取命令_仅空手且已对位时": "cd /home/yuting/robot_env\nvenv/bin/python - <<'PYCODE'\nimport sys\nimport time\nsys.path.insert(0, \"app\")\nimport robot_config\nfrom robotmove import RobotMove\nfrom competition_main import BODY_PORT\nrobot = RobotMove(None, port=BODY_PORT)\ntry:\n    time.sleep(2)\n    robot.robotMove(\"HOLD_BOX\")\nfinally:\n    robot.close()\nPYCODE",
+    "启动标定命令": "cd /home/yuting/robot_env\nvenv/bin/python competition.py --run --calibrate-carry --color blue",
+    "标定入口身体行为": "不连接身体串口，不自动站立，不自动抱取、不放下；会打开双摄并调整头部。必须先准备真实持物姿态。",
+    "逐步步骤": [
+      "先备份标定文件和同步代码；使用现场正确设备配置。",
+      "机器人对准物块，在保护下单独执行站立等待2秒再HOLD_BOX；已有持物姿态则不要再次执行。",
+      "在保持真实持物关节姿态的前提下，将机器人放到实际预计放下的位置与朝向；立牌保持比赛时的位置和角度。",
+      "投放位置要考虑松.dzz执行后的实际物块落点，不是仅让二维码居中。新位置尚未验证时，应在防倒保护下单独验证放下效果，再重新抱起复现位置保存参考。",
+      "运行标定入口。头部初始127是正常的，D使用腹部，J会把头部切到133。",
+      "腹部窗口中必须唯一精确解码action2，二维码完整，四边离图像边缘超过1%，稳定至少5个检测帧。",
+      "点击OpenCV摄像头窗口获得焦点，按小写d保存腹部D；看终端已保存消息。D不会改变H。",
+      "身体和立牌不移动。若头部能看清action2，按小写j，第一次从127切换到133；等待稳定及5帧，再按小写j保存J。",
+      "头部被物块遮挡时不要勉强保存J；先保留有效腹部D。已有但对应旧位置的J可导致回退到旧参考，需检查，不要盲目依赖旧J。",
+      "按小写q退出；身体保持原姿态，不自动放下；Q不会撤销已发送动作。",
+      "检查JSON中drop_quad或drop_head_quad确实存在且各有4个二维点，target_qr为action2，对应头位133；比较备份确认pickup未变化。",
+      "从比赛真实起点空手复位，使用对应入口实跑，观察action2四角匹配、靠近、停步、放下实际效果；单次成功不代表所有接近角度都成功。"
+    ],
+    "检查标定命令": "cd /home/yuting/robot_env\nvenv/bin/python - <<'PYCODE'\nimport json\nfrom pathlib import Path\np = Path(\"config/carry_dual_reference.json\")\nr = json.loads(p.read_text())\nprint(\"target_qr:\", r.get(\"target_qr\"))\nprint(\"drop_camera:\", r.get(\"drop_camera\"))\nprint(\"head position:\", r.get(\"drop_head_position\"))\nfor key in (\"pickup\", \"drop\", \"drop_quad\", \"drop_head\", \"drop_head_quad\"):\n    print(key, \":\", r.get(key))\nb = Path(\"config/carry_dual_reference.before-quad.json\")\nif b.exists():\n    old = json.loads(b.read_text())\n    print(\"H保持不变:\", old.get(\"pickup\") == r.get(\"pickup\"))\nPYCODE",
+    "成功判据": [
+      "终端显示已保存",
+      "对应相机四角字段为4个二维点，不能只看到drop矩形就认为新几何标定完成",
+      "H未被改写",
+      "完整action2稳定可读",
+      "对应身体姿态下实际放物落点正确"
+    ],
+    "常见问题": {
+      "D或J不能保存": "读错目标、二维码不完整、靠边、未满5帧、头未稳定、配置/尺寸/目标不匹配；按终端原因处理，不删保护",
+      "J第一次不保存": "正常；第一次切头133，稳定后再按一次",
+      "只保存D是否可跑": "至少一份对应视角有效投放参考即可；双摄都可见且标定有效更利于切换",
+      "新标定等待透视不匹配": "实跑接近方向/姿态与标定不同，或四角恢复失败；不要盲目放宽阈值，应复现标定姿态/检查图像",
+      "没有drop_quad字段": "可能运行旧代码或当前解码未返回可靠四角；先核实同步和紫色四边形，旧宽高标定仍可能显示保存成功",
+      "Qt字体提示": "此前不阻止预览；与无设备、无帧错误分别处理",
+      "路径末尾index缺0": "修正ROBOT_KICK_HEAD_DEVICE为index0；pigpio ready不代表相机已就绪"
+    },
+    "仅更新D且旧J已不适用时": {
+      "条件": "只在头部被遮挡、无法重做J，且旧J不是当前真实身体投放位置/朝向时使用。若J已在同一真实姿态更新，不执行此命令。",
+      "用途": "停用旧头部回退参考，保留现有H、新D和其他配置；先确保备份已保存。",
+      "命令": "cd /home/yuting/robot_env\nvenv/bin/python - <<'PYCODE'\nimport json\nfrom pathlib import Path\np = Path(\"config/carry_dual_reference.json\")\nr = json.loads(p.read_text())\nfor key in (\"drop_head\", \"drop_head_quad\", \"drop_head_position\"):\n    r.pop(key, None)\np.write_text(json.dumps(r, ensure_ascii=False, indent=2) + \"\\n\")\nprint(\"已停用旧J，H和腹部D保留。\")\nPYCODE"
+    }
+  },
+  "启动命令": {
+    "公共环境": "cd /home/yuting/robot_env\nbash setup_head_pwm.sh start\nexport ROBOT_HEAD_PWM_BACKEND=pigpio\nexport ROBOT_CAMERA_FOURCC=MJPG\nexport ROBOT_KICK_HEAD_DEVICE=/dev/v4l/by-id/usb-lihappe8_Corp._USB_2.0_Camera-video-index0",
+    "原版红物块": "venv/bin/python competition.py --run --actions --color red",
+    "新版红物块": "venv/bin/python competition_line.py --run --actions --color red --line-color white",
+    "新版蓝物块": "venv/bin/python competition_line.py --run --actions --color blue --line-color white",
+    "寻线仅预览": "venv/bin/python competition_line.py --run --preview --line-color white",
+    "原版模拟": "venv/bin/python competition.py --simulate --color red",
+    "新版模拟": "venv/bin/python competition_line.py --simulate --color blue",
+    "标定": "venv/bin/python competition.py --run --calibrate-carry --color blue",
+    "开跑要求": "完整比赛从场地起点空手开始；不要从标定的抱物蹲姿直接开全比赛"
+  },
+  "下一位接手应优先确认": [
+    "先读当前代码与本交接，不照抄旧交接的头位和动作次数",
+    "核对树莓派实际已同步哪些文件，不能将本地提交当现场部署证明",
+    "确认最新D/J含四角及真实投放视角；保留H和足球参考",
+    "检查蓝色候选预览及真实背景误检，若需要颜色采样或身份模型，应基于现场图像，不虚构阈值保证",
+    "如果仍会因胶带/二维码跑偏，采集腹部原始帧验证线路掩膜",
+    "先分阶段实测，再全比赛；不把软件测试或模拟当真实硬件成功"
+  ]
+}
