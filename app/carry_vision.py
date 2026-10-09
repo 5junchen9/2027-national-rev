@@ -23,7 +23,7 @@ PICKUP_FRAMES = 2
 FINAL_FRAMES = 5  # 保存标定仍确认5帧。
 NEAR_BOTTOM = .88
 TRANSFER_STEPS = 3  # 只限制近处目标丢失后的无目标小步，不限制看得见目标时的正常靠近。
-PICKUP_TOP = .40  # 从底部算60%，即从顶部算40%；上沿到线或在线上方才抱。
+PICKUP_TOP = .20  # 从底部算80%，即从顶部算20%；上沿到线或在线上方才抱。
 QR_WAIT_SECONDS = 5.0
 DELIVERY_OBSERVE_SECONDS = 1.2  # 二维码搬运每个身体动作结束后，等待画面稳定。
 RUN_SECONDS = 300
@@ -104,7 +104,9 @@ def find_blocks(frame, color, near=False):
         polygon = cv2.approxPolyDP(hull,.02*cv2.arcLength(hull,True),True)
         clipped = touches_side or y <= 2 or y+h >= height-2
         min_corners = 3 if clipped else 4
-        if min_corners <= len(polygon) <= 6 and area/cv2.contourArea(hull) >= .65:
+        # 腹部近处盒子底部出画时，多面外轮廓和裁切边可能形成7～8个角。
+        max_corners = 8 if near and y+h >= height-2 else 6
+        if min_corners <= len(polygon) <= max_corners and area/cv2.contourArea(hull) >= .65:
             blocks.append(Box(x,y,w,h))
     if color == 'blue':
         # 完整盒面增加独立边缘要求；近处截断目标仍由原有近处跟踪控制。
@@ -493,7 +495,7 @@ def region_pickup_action(box, reference, flip):
 
 
 def pickup_action(box, reference, flip):
-    """横向对齐后，上沿到达顶部40%横线才抱；旧H下沿不终止接近。"""
+    """横向对齐后，上沿到达顶部20%横线才抱；旧H下沿不终止接近。"""
     if reference.get('pickup_mode') == 'visible_region':
         return region_pickup_action(box,reference,flip)
     target = Box(*reference['pickup'])
@@ -594,7 +596,7 @@ class CarryPlanner:
         if self.phase == 'PICKUP':
             action = pickup_action(box,self.reference,self.flip)
             self.pending_belly_approach = True
-            self.reason = f'belly top={box.y:.1%}, pickup line=40% (60% from bottom); '+action
+            self.reason = f'belly top={box.y:.1%}, pickup line=20% (80% from bottom); '+action
             if action == 'UP_LITTLE' and self.belly_approach_steps >= 6:
                 self.reason = '6 belly approach steps without reaching pickup line; stop'
                 return 'STOP'
@@ -698,11 +700,12 @@ class CarryPlanner:
 
 
 SCAN_LIMIT = 'scan_limit'
+RIGHT_SCAN_STEPS = 7
 
 
 def scan_while_moving_right(move, head_eye, belly_eye, servo, target_qr,
                             reference, qr_reader, deadline, exit_right_actions):
-    """抱物右移最多10步，后台扫码；超限放下并右转，返回专用结果。"""
+    """抱物右移最多7步，后台扫码；超限放下，交回比赛流程视觉找球。"""
     from competition_route import RouteVision
     camera = 'belly'
     detector = cv2.QRCodeDetector()
@@ -720,7 +723,7 @@ def scan_while_moving_right(move, head_eye, belly_eye, servo, target_qr,
             same = partial['box'] is not None and overlap(partial['box'],box) >= .45
             partial['frames'] = partial['frames']+1 if same else 1
             partial['box'] = box
-            if partial['frames'] >= 3:
+            if partial['frames'] >= 1:
                 partial['reached'] = True
         return codes
     # 先等头位133稳定，避免把移动中的头部画面作为投放目标。
@@ -743,9 +746,9 @@ def scan_while_moving_right(move, head_eye, belly_eye, servo, target_qr,
                 raise ValueError('扫码时相机尺寸变化，停止动作')
             for name, frame in (('head',head),('belly',belly)):
                 display = frame.copy()
-                cv2.putText(display,f'carry right {steps}/10; scan {camera}',(8,25),0,.6,(0,255,255),1)
+                cv2.putText(display,f'carry right {steps}/{RIGHT_SCAN_STEPS}; scan {camera}',(8,25),0,.6,(0,255,255),1)
                 if name == 'belly':
-                    cv2.putText(display,f'edge QR: {partial["frames"]}/3',(8,50),0,.6,(0,255,255),1)
+                    cv2.putText(display,f'edge QR: {partial["frames"]}/1',(8,50),0,.6,(0,255,255),1)
                     box = partial['box']
                     if box is not None:
                         cv2.rectangle(display,(int(box.x),int(box.y)),
@@ -754,7 +757,7 @@ def scan_while_moving_right(move, head_eye, belly_eye, servo, target_qr,
             if cv2.waitKey(1)&255 in (ord('q'),27):
                 return False
             if stream.saw_target() or partial['reached']:
-                print('腹部边缘部分二维码连续确认3帧，放下；未确认二维码文本。' if partial['reached']
+                print('腹部边缘部分二维码检测1次，放下；未确认二维码文本。' if partial['reached']
                       else '腹部已精确识别目标二维码，直接放下。')
                 move.robotMove('DOWN_BOX')
                 return True
@@ -763,15 +766,11 @@ def scan_while_moving_right(move, head_eye, belly_eye, servo, target_qr,
             # 每步结束至少等一个解码完成，不因解码慢连续多迈步。
             if stream.waiting_for_decode():
                 continue
-            if steps == 10:
-                print('10次右移未确认目标，原地放下后右转，跳过足球接dance。')
-                for action in ['DOWN_BOX']+['TURN_RIGHT']*exit_right_actions:
-                    if deadline is not None and time.monotonic() >= deadline:
-                        return False
-                    stream.read()  # 相机故障时停止后续动作。
-                    move.robotMove(action)
+            if steps == RIGHT_SCAN_STEPS:
+                print(f'{RIGHT_SCAN_STEPS}次右移未确认目标，原地放下，继续视觉找球和足球流程。')
+                move.robotMove('DOWN_BOX')
                 return SCAN_LIMIT
-            print('抱物右平移:',steps+1,'/10')
+            print('抱物右平移:',steps+1,f'/{RIGHT_SCAN_STEPS}')
             move.robotMove('SIDE_RIGHT_HOLDBOX')
             steps += 1
             ready_at = time.monotonic()+DELIVERY_OBSERVE_SECONDS
@@ -841,21 +840,21 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
         print('候选显示score总分、C颜色分、S形状分；这是匹配评分，不是识别概率。')
         print('H=腹部抱取；D=腹部投放；J=133头部投放；Q=退出。')
         if right_scan:
-            print('抱起后右平移并后台扫码，最多10步；超限原地放下并右转。')
+            print(f'抱起后右平移并后台扫码，最多{RIGHT_SCAN_STEPS}步；超限原地放下，由比赛流程继续视觉找球。')
         else:
             print('抱起后预右转次数:',delivery_right_actions,'；次数不是角度，需现场测量。')
         print('腹部确认后独占接近控制；旧位置失配时单个强目标稳定3帧重新确认。H可保存局部参考。')
         print('未确认腹部候选不阻断可靠头部靠近；投放时头部133与腹部共同找目的地；优先使用有标定且实际解码成功的视角。')
         print('接近、腹部接手和抱起确认2帧；腹部目标码解码一次即放下。' if right_scan else '抱起确认2帧，D/J投放确认3帧。')
         print('H仅参考横向位置；不比较盒子尺寸，不追加面积或形状分抱取门槛。')
-        print('腹部目标横向对齐后，上沿到达或高于顶部40%横线（y<=40%）才抱取；每次小步后重新观察，最多6次。上方40%线需现场验证。')
+        print('腹部目标横向对齐后，上沿到达或高于顶部20%横线（y<=20%）才抱取；每次小步后重新观察，最多6次。上方20%线需现场验证。')
         print('可见目标跟随每次6单位；丢失搜索每次3单位、观察1.5秒，范围120至140。')
         print('二维码搬运每次身体动作结束后额外观察1.2秒，再决定下一步。')
         print('二维码丢失后每个位置原地尝试5秒，再有限转向搜索；搬运总上限300秒、40次身体动作。')
         print('交接须目标居中、下沿到88%、宽度至少30%、框面积至少10%。')
         print('看得见目标时正常靠近；近处丢失后先低头找回，到低头边界仍丢失才最多惯性前进3次UP_LITTLE，腹部未接手则停止。')
         if right_scan:
-            print('腹部目标码解码一次，或边缘部分码连续检测3帧就放下；部分码不能确认文本。')
+            print('腹部目标码解码一次，或边缘部分码检测1次就放下；部分码不能确认文本。')
         else:
             print('实际投放用D位置与宽高参考，连续解码3帧才放下。')
         while True:
@@ -965,7 +964,7 @@ def run(color, target_qr, actions=False, robot=None, search_right_actions=5, dea
                     edge = PICKUP_TOP
                     y = round(edge*display.shape[0])
                     cv2.line(display,(0,y),(display.shape[1]-1,y),(0,255,255),1)
-                    line_label = 'pickup top: y <= 40% (60% from bottom)'
+                    line_label = 'pickup top: y <= 20% (80% from bottom)'
                     cv2.putText(display,line_label,(8,max(110,y-6)),0,.4,(0,255,255),1)
                 if name == 'belly' or handover.angle == DELIVERY_HEAD_POSITION:
                     target = drop_reference(reference,name)

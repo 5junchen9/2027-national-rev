@@ -4,7 +4,7 @@ from unittest.mock import Mock, call, patch
 
 from competition_main import CONFIG_FILE, load_settings
 from competition_line_main import main
-from line_search_route import run_from_line
+from line_search_route import run_from_line, run_from_carry
 
 
 class LineToDanceTests(unittest.TestCase):
@@ -14,33 +14,53 @@ class LineToDanceTests(unittest.TestCase):
         io.carry.return_value = True
         return io
 
-    def test_normal_chain_starts_at_line_and_aligns_before_sport(self):
+    def test_normal_chain_starts_at_line_and_enters_sport_directly(self):
         io = self.make_io()
         self.assertTrue(run_from_line(io, "blue"))
         actions = [item for item in io.method_calls if item[0] != "phase"]
         self.assertEqual(actions, [
             call.follow_to_carry("blue"),
             call.carry("blue", "action2"),
-            call.align_football(), call.sport(), call.right(7),
-            call.set_head(120), call.scan_until("dance", "head", confirm_frames=2),
-            call.enter_blue(), call.dance(),
+            call.sport(), call.find_dance(), call.forward(10), call.dance(),
         ])
 
-    def test_scan_limit_skips_football_and_continues_to_dance(self):
+    def test_scan_limit_continues_football_then_dance(self):
         io = self.make_io()
         io.carry.return_value = "scan_limit"
         self.assertTrue(run_from_line(io, "red"))
         io.align_football.assert_not_called()
-        io.sport.assert_not_called()
-        io.right.assert_not_called()  # 超限右转由搬运模块执行，不重复转。
+        io.sport.assert_called_once()
+        io.find_dance.assert_called_once()
+        io.forward.assert_called_once_with(10)
         io.dance.assert_called_once()
 
-    def test_alignment_failure_prevents_sport_and_dance(self):
+    def test_carry_start_skips_line_and_enters_sport_directly(self):
         io = self.make_io()
-        io.align_football.side_effect = RuntimeError("足球区对齐失败")
-        with self.assertRaisesRegex(RuntimeError, "足球区对齐失败"):
+        self.assertTrue(run_from_carry(io, "red"))
+        actions = [item for item in io.method_calls if item[0] != "phase"]
+        self.assertEqual(actions, [
+            call.carry("red", "action2"), call.sport(), call.find_dance(), call.forward(10), call.dance(),
+        ])
+
+    def test_carry_start_simulation_selects_carry_course(self):
+        with patch("sys.argv", ["competition_line.py", "--from-carry", "--simulate"]), \
+                patch("competition_line_main.run_from_carry") as carry, \
+                patch("competition_line_main.run_course") as full:
+            self.assertTrue(main())
+        carry.assert_called_once()
+        full.assert_not_called()
+
+    def test_carry_start_rejects_conflicting_start(self):
+        with patch("sys.argv", ["competition_line.py", "--from-carry", "--from-line", "--simulate"]):
+            with self.assertRaises(SystemExit):
+                main()
+
+    def test_sport_failure_prevents_dance(self):
+        io = self.make_io()
+        io.sport.side_effect = RuntimeError("足球阶段失败")
+        with self.assertRaisesRegex(RuntimeError, "足球阶段失败"):
             run_from_line(io, "red")
-        io.sport.assert_not_called()
+        io.align_football.assert_not_called()
         io.dance.assert_not_called()
 
     def test_simulation_selects_partial_course(self):

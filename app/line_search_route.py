@@ -124,6 +124,105 @@ def near_line_sample(segments, height, width, previous_x=None):
     return min(candidates, key=lambda item:abs(item[0]-anchor))
 
 
+def stripe_width(mask, x, y, angle):
+    """沿白带的法线量宽度；Hough端点在边缘，允许向两侧寻找白像素。"""
+    height, width = mask.shape
+    radians = math.radians(angle)
+    dx, dy = math.cos(radians), math.sin(radians)
+
+    def white_at(distance):
+        px = round(x + distance*dx)
+        py = round(y + distance*dy)
+        return 0 <= px < width and 0 <= py < height and mask[py, px] != 0
+
+    start = next((offset for offset in (0, 1, -1, 2, -2, 3, -3)
+                  if white_at(offset)), None)
+    if start is None:
+        return None
+    left = right = start
+    limit = round(width*.12)
+    while left > start-limit and white_at(left-1):
+        left -= 1
+    while right < start+limit and white_at(right+1):
+        right += 1
+    if left == start-limit or right == start+limit:
+        return None
+    return right-left+1
+
+
+class LineWidthReference:
+    """前进后积累10帧有效近线，逐高度保存宽度；完成后不再更新。"""
+    def __init__(self):
+        self.frames = []
+        self.widths = {}
+        self.previous = None
+        self.ready = False
+
+    def sample(self, mask, segments):
+        if self.ready:
+            return
+        height, width = mask.shape
+        x, angle = near_line_sample(segments, height, width)
+        if x is None or abs(angle) > 10:
+            self.previous = None
+            return
+        if self.previous is not None:
+            old_x, old_angle = self.previous
+            if abs(x-old_x) > width*.06 or abs(angle-old_angle) > 10:
+                self.previous = (x, angle)
+                return  # 跳变帧不采，保留之前有效采样。
+        self.previous = (x, angle)
+        near_segments = [segment for segment in segments
+                         if near_line_sample([segment], height, width)[0] is not None]
+        anchor = min(near_segments,
+                     key=lambda segment: abs(near_line_sample([segment], height, width)[0]-x))
+        anchor_x1, anchor_y1, anchor_x2, anchor_y2 = anchor
+        # 从选中的近线向上找同一路线，仅记录实际有线段覆盖的高度。
+        values = {}
+        for y in range(12, height-12, 24):
+            expected_x = anchor_x1+(anchor_x2-anchor_x1)*(anchor_y1-y)/(anchor_y1-anchor_y2)
+            candidates = []
+            for x1, y1, x2, y2 in segments:
+                if y2 <= y <= y1 and y1 != y2:
+                    segment_x = x1+(x2-x1)*(y1-y)/(y1-y2)
+                    if abs(segment_x-expected_x) <= width*.04:
+                        candidates.append((abs(segment_x-expected_x), segment_x,
+                                           math.degrees(math.atan2(x2-x1, y1-y2))))
+            if candidates:
+                _, segment_x, segment_angle = min(candidates)
+                measured = stripe_width(mask, segment_x, y, segment_angle)
+                if measured is not None:
+                    values[y] = measured
+        if not any(y >= height*.75 for y in values):
+            return
+        self.frames.append(values)
+        if len(self.frames) == 10:
+            for y in sorted({row for frame in self.frames for row in frame}):
+                samples = [frame[y] for frame in self.frames if y in frame]
+                if len(samples) >= 7:
+                    self.widths[y] = float(np.median(samples))
+            self.ready = True
+
+    def filter(self, mask, segments):
+        if not self.ready:
+            return segments
+        accepted = []
+        for segment in segments:
+            x1, y1, x2, y2 = segment
+            angle = math.degrees(math.atan2(x2-x1, y1-y2))
+            matches = []
+            for y, reference in self.widths.items():
+                if y2 <= y <= y1 and y1 != y2:
+                    x = x1+(x2-x1)*(y1-y)/(y1-y2)
+                    measured = stripe_width(mask, x, y, angle)
+                    matches.append(measured is not None and
+                                   reference*.7 <= measured <= reference*1.3)
+            # 没采过的高度放行；多数取样点符合宽度才接受，容许局部阴影或弯角。
+            if not matches or sum(matches) > len(matches)/2:
+                accepted.append(segment)
+        return accepted
+
+
 class LinePlanner:
     def __init__(self):
         self.previous_x = None
@@ -198,18 +297,20 @@ def run_course(io, color):
 
 def run_from_line(io, color):
     """从当前位置寻线到跳舞；正式比赛和临时测试共用后半程。"""
-    settings = io.settings
     io.phase("开始寻线，寻找指定颜色物块（尚未进入搬运）")
     io.follow_to_carry(color)
+    return run_from_carry(io, color)
+
+
+def run_from_carry(io, color):
+    """从当前位置找物搬运，再连续执行足球和舞蹈。"""
+    settings = io.settings
     io.phase("指定颜色搬运")
-    carry_result = io.carry(color, settings["drop_qr"])
-    if carry_result != "scan_limit":
-        io.phase("足球区内侧边线对齐")
-        io.align_football()
-        io.sport()
-        io.right(settings["after_sport_right_actions"])
-    io.set_head(settings["dance_head_position"])
-    io.scan_until(settings["dance_qr"], "head", confirm_frames=2)
-    io.enter_blue()
+    io.carry(color, settings["drop_qr"])
+    io.phase("放下完成，视觉找球后开始足球")
+    io.sport()
+    io.phase("右转寻找dance，最多9次")
+    io.find_dance()
+    io.forward(10)
     io.dance()
     return True

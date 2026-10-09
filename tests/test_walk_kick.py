@@ -92,7 +92,7 @@ class WalkKickTests(unittest.TestCase):
         self.assertEqual(self.decide(planner,elapsed=3.33,ambiguous=True),'RAISE_HEAD')
 
     def test_belly_alignment_and_horizontal_flip(self):
-        for flip,expected in [('none','SIDE_LEFT'),('1','SIDE_RIGHT')]:
+        for flip,expected in [('none','TURN_RIGHT'),('1','TURN_LEFT'),('-1','TURN_LEFT'),('0','TURN_RIGHT')]:
             planner=WalkKick()
             for _ in range(5):
                 action=self.decide(planner,belly=(400,96,128,96),phase='BELLY',flip=flip)
@@ -101,11 +101,36 @@ class WalkKickTests(unittest.TestCase):
         for _ in range(5): action=self.decide(planner,belly=(288,110,64,48),phase='BELLY')
         self.assertEqual(action,'UP_LITTLE')
 
-    def test_head_alignment_uses_corrected_real_robot_direction(self):
-        for box,expected in [((60,200,60,60),'SIDE_RIGHT'),((500,200,60,60),'SIDE_LEFT')]:
+    def test_head_alignment_turns_toward_ball(self):
+        for box,expected in [((60,200,60,60),'TURN_LEFT'),((500,200,60,60),'TURN_RIGHT')]:
             planner=WalkKick()
             for _ in range(5): action=self.decide(planner,head=box)
             self.assertEqual(action,expected)
+
+    def test_head_turn_mirror_and_confirmation_reset(self):
+        for flip in ('none','0','1','-1'):
+            planner = WalkKick()
+            for _ in range(4):
+                self.assertEqual(self.decide(planner,head=(60,200,60,60),flip=flip),'WAIT')
+            expected = 'TURN_RIGHT' if flip in ('1','-1') else 'TURN_LEFT'
+            self.assertEqual(self.decide(planner,head=(60,200,60,60),flip=flip),expected)
+            planner.mark_sent(expected)
+            # 发完转向后，重新观察、确认居中的球，才允许前进。
+            for _ in range(4):
+                self.assertEqual(self.decide(planner,head=(290,200,60,60),flip=flip),'WAIT')
+            self.assertEqual(self.decide(planner,head=(290,200,60,60),flip=flip),'UP_LITTLE')
+
+    def test_fixed_head_loss_recovery_never_requests_pitch_search(self):
+        planner = WalkKick(fixed_head=True)
+        self.assertEqual(self.decide(planner),'WAIT')
+        self.assertEqual(self.decide(planner,elapsed=.15),'WAIT')
+        self.assertEqual(self.decide(planner,elapsed=.31),'REACQUIRE')
+        for elapsed in (2,10,60,300):
+            self.assertEqual(self.decide(planner,elapsed=elapsed),'WAIT')
+        self.assertEqual(planner.actions,0)
+
+    def test_turn_action_reaches_shared_body_controller(self):
+        self.run_loop('turn_then_disconnect')
 
     def test_centered_ball_keeps_walking_without_kick(self):
         planner=WalkKick()
@@ -118,13 +143,13 @@ class WalkKickTests(unittest.TestCase):
         for _ in range(5): action=self.decide(planner,belly=(200,70,240,200),phase='BELLY')
         self.assertEqual(action,'UP_LITTLE')
 
-    def test_belly_ball_alone_is_enough_to_walk_and_never_turn(self):
+    def test_belly_ball_alone_turns_or_walks_without_goal(self):
         planner=WalkKick()
         for _ in range(5): action=self.decide(planner,belly=(288,110,64,48),phase='BELLY')
         self.assertEqual(action,'UP_LITTLE')
         for box in ((40,100,60,60),(500,100,60,60)):
             for _ in range(5): action=self.decide(planner,belly=box,phase='BELLY')
-            self.assertIn(action,('SIDE_LEFT','SIDE_RIGHT'))
+            self.assertIn(action,('TURN_LEFT','TURN_RIGHT'))
 
     def test_lost_ball_cannot_blind_walk(self):
         planner=WalkKick();planner.search_stage='VISUAL';planner.search_head_moves=3
@@ -159,6 +184,9 @@ class WalkKickTests(unittest.TestCase):
         self.assertIsNone(angle)
         self.assertEqual(state.phase,'BELLY')
 
+    def test_competition_returns_on_first_valid_belly_detection(self):
+        self.run_loop('competition_belly')
+
     def run_loop(self, scenario):
         settings=camera_settings()
         profile=dict(version=1,gpio_bcm=27,forward=117,handover=127,down_sign=1,
@@ -176,8 +204,11 @@ class WalkKickTests(unittest.TestCase):
             result.update.return_value=box
             return result
         head_tracker=tracker((290,200,60,60) if scenario in ('walk_then_disconnect','visible_head_unstable') else None)
+        if scenario == 'turn_then_disconnect':
+            settings['head']['flip'] = 'none'
+            head_tracker.update.return_value = (60,200,60,60)
         if scenario == 'visible_head_unstable': head_tracker.stable_frames=1
-        belly_tracker=tracker((256,96,128,96) if scenario not in ('walk_then_disconnect','startup_no_ball','search_stop','lock_recovery','visible_head_unstable') else None)
+        belly_tracker=tracker((256,96,128,96) if scenario not in ('walk_then_disconnect','turn_then_disconnect','startup_no_ball','search_stop','lock_recovery','visible_head_unstable') else None)
         if scenario == 'lock_recovery':
             head_tracker.reason='outside target lock: retry=3/3 confirm=1/3'
         if scenario == 'partial_handover':
@@ -185,9 +216,9 @@ class WalkKickTests(unittest.TestCase):
             belly_tracker.stable_frames=1
         if scenario == 'ball_sent':
             def show_sent_ball(action):
-                belly_tracker.update.return_value=(280,20,80,60)
+                belly_tracker.update.return_value=None
             robot.robotMove.side_effect=show_sent_ball
-        if scenario == 'walk_then_disconnect':
+        if scenario in ('walk_then_disconnect','turn_then_disconnect'):
             def disconnect_after_move(action):
                 head.getImage.side_effect = RuntimeError('USB disconnected')
             robot.robotMove.side_effect = disconnect_after_move
@@ -198,6 +229,7 @@ class WalkKickTests(unittest.TestCase):
             for name,data in [('head_calibration',profile),('right_foot_reference',foot)]:
                 (root/'config'/f'{name}.json').write_text(json.dumps(data))
             with patch.object(handover_debug,'ROOT',root), \
+                 patch.object(handover_debug,'camera_settings',side_effect=lambda: json.loads(json.dumps(settings))), \
                  patch.object(handover_debug,'RobotEye',side_effect=[head,belly]), \
                  patch.object(handover_debug,'PatchTracker',side_effect=[head_tracker,belly_tracker]), \
                  patch.dict('sys.modules',{
@@ -207,10 +239,12 @@ class WalkKickTests(unittest.TestCase):
                  patch.object(cv2,'imshow'),patch.object(cv2,'destroyAllWindows'), \
                  patch.object(cv2,'waitKey',side_effect=lambda _: ord('q') if (scenario == 'startup_no_ball'
                      or (scenario in ('partial_handover','visible_head_unstable') and head.getImage.call_count >= 20)
-                     or (scenario == 'search_stop' and servo.begin_vertical.call_count >= 10)
+                     or (scenario == 'search_stop' and head.getImage.call_count >= 30)
                      or (scenario == 'lock_recovery' and head_tracker.begin_search.call_count+belly_tracker.begin_search.call_count >= 1)) else -1), \
                  patch.object(handover_debug.time,'monotonic',side_effect=iter(i*(.01 if scenario == 'ball_sent' else .1) for i in range(10000))):
-                if scenario == 'ball_sent':
+                if scenario == 'competition_belly':
+                    self.assertTrue(handover_debug.run(actions=True, finish_on_belly=True))
+                elif scenario == 'ball_sent':
                     self.assertTrue(handover_debug.run(actions=True))
                 elif scenario == 'walk':
                     self.assertFalse(handover_debug.run(actions=True))
@@ -219,11 +253,11 @@ class WalkKickTests(unittest.TestCase):
                 elif scenario == 'search_stop':
                     self.assertFalse(handover_debug.run(actions=True))
                 else:
-                    expected='USB disconnected' if scenario == 'walk_then_disconnect' else 'serial disconnected'
+                    expected='USB disconnected' if scenario in ('walk_then_disconnect','turn_then_disconnect') else 'serial disconnected'
                     with self.assertRaisesRegex(RuntimeError,expected):
                         handover_debug.run(actions=True)
             self.assertEqual(json.loads((root/'config/right_foot_reference.json').read_text()),foot)
-        if scenario in ('startup_no_ball','partial_handover','lock_recovery','visible_head_unstable'):
+        if scenario in ('startup_no_ball','partial_handover','lock_recovery','visible_head_unstable','competition_belly'):
             robot.robotMove.assert_not_called()
             if scenario in ('partial_handover','visible_head_unstable'): servo.begin_vertical.assert_not_called()
             if scenario == 'lock_recovery':
@@ -231,11 +265,13 @@ class WalkKickTests(unittest.TestCase):
                 belly_tracker.begin_search.assert_called_once()
         elif scenario == 'search_stop':
             robot.robotMove.assert_not_called()
-            self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[132,135,138,141,138,135,132,129,132,135])
+            servo.begin_vertical.assert_not_called()
         elif scenario == 'walk':
             self.assertGreaterEqual(robot.robotMove.call_count,2)
             self.assertLessEqual(robot.robotMove.call_count,30)
             self.assertTrue(all(call.args == ('UP_LITTLE',) for call in robot.robotMove.call_args_list))
+        elif scenario == 'turn_then_disconnect':
+            robot.robotMove.assert_called_once_with('TURN_LEFT')
         else:
             robot.robotMove.assert_called_once_with('UP_LITTLE')
         robot_factory.assert_called_once_with(None,port='/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.4:1.0-port0')
@@ -287,35 +323,47 @@ class WalkKickTests(unittest.TestCase):
     def test_visible_unstable_head_ball_stops_head_search_without_body_action(self):
         self.run_loop('visible_head_unstable')
 
-    def test_real_loop_stops_after_ball_recedes_without_another_forward_action(self):
+    def test_real_loop_stops_after_ball_disappears_without_another_forward_action(self):
         self.run_loop('ball_sent')
 
 
 class BallDepartureTests(unittest.TestCase):
-    def test_five_confirmed_smaller_receding_frames_finish(self):
-        check=BallDeparture()
-        check.arm((250,280,140,140),(480,640),129,now=0)
+    def test_five_missing_frames_spanning_point_three_seconds_finish(self):
+        check=BallDeparture();check.arm(129,now=0)
         for i in range(4):
-            self.assertEqual(check.observe((270,160,90,90),3,(480,640),129,now=.2+i*.11),'WAIT')
-        self.assertEqual(check.observe((270,160,90,90),3,(480,640),129,now=.7),'DONE')
+            self.assertEqual(check.observe(None,129,now=.5+i*.1),'WAIT')
+        self.assertEqual(check.observe(None,129,now=.91),'DONE')
 
-    def test_lost_ball_or_shrinking_cap_does_not_finish(self):
-        check=BallDeparture();check.arm((250,280,140,140),(480,640),129,now=0)
-        for i in range(12):
-            self.assertNotEqual(check.observe(None,0,(480,640),129,now=i*.1),'DONE')
-        for i in range(8):
-            self.assertNotEqual(check.observe((250,280,140,40),5,(480,640),129,now=1.2+i*.1),'DONE')
+    def test_missing_before_forward_step_never_finishes(self):
+        check=BallDeparture()
+        self.assertIsNone(check.observe(None,129,now=0))
 
-    def test_head_move_invalidates_comparison_and_new_step_resets_it(self):
-        check=BallDeparture();check.arm((250,280,140,140),(480,640),129,now=0)
-        self.assertIsNone(check.observe((270,160,90,90),5,(480,640),132,now=.4))
-        self.assertIsNone(check.reference)
-        check.arm((250,280,140,140),(480,640),132,now=1)
+    def test_visible_ball_resets_missing_confirmation(self):
+        check=BallDeparture();check.arm(129,now=0)
+        for i in range(4):check.observe(None,129,now=.1+i*.1)
+        check.observe((250,280,140,40),129,now=.6)
         self.assertEqual(check.frames,0)
+        self.assertEqual(check.observe(None,129,now=.7),'WAIT')
 
-    def test_vertical_flip_is_accounted_for_and_unstable_ball_does_not_finish(self):
-        check=BallDeparture('0');check.arm((250,60,140,140),(480,640),129,now=0)
-        for i in range(8):
-            self.assertNotEqual(check.observe((270,220,90,90),1,(480,640),129,now=.2+i*.1),'DONE')
-        for i in range(5): result=check.observe((270,220,90,90),5,(480,640),129,now=1+i*.11)
-        self.assertEqual(result,'DONE')
+    def test_visible_smaller_receding_ball_does_not_finish(self):
+        check=BallDeparture();check.arm(129,now=0)
+        for i in range(15):
+            self.assertNotEqual(check.observe((270,160,90,90),129,now=.2+i*.1),'DONE')
+
+    def test_head_move_or_expired_window_cancels_observation(self):
+        for angle,now in [(132,.4),(129,3.1)]:
+            check=BallDeparture();check.arm(129,now=0)
+            self.assertIsNone(check.observe(None,angle,now=now))
+            self.assertIsNone(check.angle)
+
+    def test_five_fast_misses_alone_are_not_enough(self):
+        check=BallDeparture();check.arm(129,now=0)
+        for i in range(5):
+            self.assertEqual(check.observe(None,129,now=.5+i*.01),'WAIT')
+
+    def test_new_forward_step_resets_previous_confirmation(self):
+        check=BallDeparture();check.arm(129,now=0)
+        for i in range(4):check.observe(None,129,now=.1+i*.1)
+        check.arm(129,now=.6)
+        self.assertEqual(check.frames,0)
+        self.assertEqual(check.observe(None,129,now=.7),'WAIT')

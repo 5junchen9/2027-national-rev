@@ -175,12 +175,12 @@ class CompetitionTests(unittest.TestCase):
             calls = [call[0] for call in io.method_calls]
             self.assertLess(calls.index('identity'), calls.index('carry'))
             self.assertLess(calls.index('carry'), calls.index('sport'))
-            self.assertLess(calls.index('sport'), calls.index('enter_blue'))
-            self.assertLess(calls.index('enter_blue'), calls.index('dance'))
+            self.assertLess(calls.index('sport'), calls.index('find_dance'))
+            self.assertLess(calls.index('find_dance'), calls.index('dance'))
             io.dance.assert_called_once()
             io.carry.assert_called_once_with(color, io.settings['drop_qr'])
             self.assertEqual([(call.args[0], call.args[1]) for call in io.scan_until.call_args_list],
-                             [('face', 'belly'), ('left', 'belly'), ('action1', 'belly'), ('dance', 'head')])
+                             [('face', 'belly'), ('left', 'belly'), ('action1', 'belly')])
 
     def test_failed_identity_never_enters_carry_or_dance(self):
         io = Mock();io.settings = self.settings()
@@ -361,7 +361,7 @@ class CompetitionTests(unittest.TestCase):
         with patch('carry_vision.run', return_value=True) as carry:
             io.carry('blue', io.settings['drop_qr'])
         carry.assert_called_once_with('blue', io.settings['drop_qr'], actions=True,
-                                      robot=robot, search_right_actions=5, deadline=999, right_scan=True, exit_right_actions=7,
+                                      robot=robot, search_right_actions=5, deadline=999, right_scan=True,
                                       qr_reader=competition_main.read_codes, use_original_drop=False,
                                       eyes=(io.head_eye,io.belly_eye),servo=io.servo)
         io.stop_route.assert_called_once();io.resume_route.assert_called_once()
@@ -375,7 +375,7 @@ class CompetitionTests(unittest.TestCase):
         self.assertTrue(carry.call_args.kwargs['use_original_drop'])
 
     def test_failure_in_each_task_never_starts_later_tasks(self):
-        tasks = ['identity', 'carry', 'sport', 'enter_blue', 'dance']
+        tasks = ['identity', 'carry', 'sport', 'find_dance', 'dance']
         for index, task in enumerate(tasks):
             io = Mock();io.settings = self.settings()
             getattr(io, task).side_effect = RuntimeError('task failed')
@@ -389,20 +389,20 @@ class CompetitionTests(unittest.TestCase):
             self.assertTrue(run_course(io, color))
             self.assertEqual([call.args for call in io.scan_until.call_args_list],
                              [('face', 'belly'), ('left', 'belly'),
-                              ('action1', 'belly'), ('dance', 'head')])
-            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 3, 3, 7])
+                              ('action1', 'belly')])
+            self.assertEqual([call.args[0] for call in io.right.call_args_list], [1, 3, 3])
             io.left.assert_called_once_with(1)
-            self.assertEqual([call.args[0] for call in io.forward.call_args_list], [])
+            self.assertEqual([call.args[0] for call in io.forward.call_args_list], [10])
             calls = [call[0] for call in io.method_calls]
             carry_index = calls.index('carry')
             self.assertEqual(calls[carry_index-2:carry_index], ['right', 'phase'])
             io.carry.assert_called_once_with(color, io.settings['drop_qr'])
             io.dance.assert_called_once()
-            self.assertEqual(io.scan_until.call_args_list[-1].kwargs,dict(confirm_frames=2))
+            io.find_dance.assert_called_once()
             self.assertEqual(io.settings['drop_qr'],'action2')
             self.assertEqual(io.settings['sport_head_position'],125)
-            self.assertEqual(calls[carry_index+1:carry_index+3],['phase','phase'])
-            self.assertLess(calls.index('align_football'),calls.index('sport'))
+            self.assertEqual(calls[carry_index+1:carry_index+3],['phase','sport'])
+            io.align_football.assert_not_called()
 
     def test_face_turns_are_single_turn_actions_around_identity(self):
         from robotmove import ACTIONS
@@ -574,6 +574,8 @@ class CompetitionTests(unittest.TestCase):
              patch('competition_identity.recognize',return_value=True) as face, \
              patch('carry_vision.run',return_value=True) as carry, \
              patch('handover_debug.run',return_value=True) as sport, \
+             patch.object(io,'find_ball') as search, \
+             patch.object(io,'forward'), \
              patch.object(cv2,'destroyAllWindows'):
             io.open_views()
             for method in (io.identity,lambda:io.carry('blue',io.settings['drop_qr']),io.sport):
@@ -583,7 +585,8 @@ class CompetitionTests(unittest.TestCase):
             for stage in (carry,sport):
                 self.assertEqual(stage.call_args.kwargs['eyes'],(head,belly))
                 self.assertIs(stage.call_args.kwargs['servo'],servo)
-            self.assertEqual(sport.call_args.kwargs['forward'],125)
+            search.assert_called_once()
+            self.assertEqual(sport.call_args.kwargs['forward'],129)
             self.assertEqual(factory.call_count,2)
             io.close_views()
         head.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
@@ -810,7 +813,7 @@ class CompetitionTests(unittest.TestCase):
         trackers = [Mock(frames=10, stable_frames=10, score=1, reason='ok', edges=[]) for _ in range(2)]
         for tracker in trackers: tracker.update.return_value = (256, 96, 128, 96)
         def ball_sent(action):
-            trackers[1].update.return_value = (280, 20, 80, 60)
+            trackers[1].update.return_value = None
         robot.robotMove.side_effect = ball_sent
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder);(root/'config').mkdir()
@@ -836,7 +839,7 @@ class CompetitionTests(unittest.TestCase):
         else:
             head.close.assert_called_once();belly.close.assert_called_once();servo.cleanup.assert_called_once()
 
-    def test_shared_sport_stops_after_ball_recedes_without_repeating_stand(self):
+    def test_shared_sport_stops_after_ball_disappears_without_repeating_stand(self):
         self.check_shared_sport()
 
     def test_sport_completes_without_opening_or_closing_borrowed_cameras(self):

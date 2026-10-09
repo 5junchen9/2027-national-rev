@@ -117,7 +117,10 @@ class PatchTracker:
 
     def notify_body_move(self):
         # 身体移动同时改变横、纵像素位置，不能沿用仅俯仰的横向锁。
+        missing_frames = self.missing
         self.begin_search()
+        # 转向不能清掉连续丢球次数，否则每3帧转一次会阻止颜色恢复。
+        self.missing = missing_frames
 
     def notify_pitch_change(self):
         self.outside_frames = self.recovery_frames = 0
@@ -183,68 +186,83 @@ class PatchTracker:
         # 放宽偏黄、暗光球面；保留圆形、圆弧和背景差异筛选。
         low = max(28 if self.hue < 55 and not self.manual else 24,self.hue-self.hue_width)
         high = min(85,self.hue+self.hue_width)
-        strong = cv2.inRange(hsv,(low,min(self.min_s,45),min(self.min_v,80)),(high,255,255))
+        strong = cv2.inRange(hsv,(low,max(80,self.min_s),min(self.min_v,80)),(high,255,255))
         # Pale yellow still has a color hint; plain white is only considered near
         # a previously identified ball, never as a whole-image acquisition rule.
         pale = cv2.inRange(hsv,(low,12,max(160,self.min_v)),(high,255,255))
-        green = cv2.bitwise_or(strong,pale)
-        # White shirts/walls must not join the ball into one giant contour.
-        # Use OpenCV's enclosing circle to bound seam reconstruction locally.
-        self.mask = green.copy()
-        seeds = cv2.morphologyEx(self.mask,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
-        contours,_ = cv2.findContours(seeds,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+        # 两路各自提取轮廓，不能因为背景中有高饱和区域就关闭浅色检测。
+        # 分开处理也避免浅色地线把高饱和球面连接成一个大轮廓。
+        weak = cv2.inRange(hsv,(low,min(self.min_s,45),min(self.min_v,80)),(high,255,255))
+        surfaces = (strong, weak|pale)
         white = cv2.inRange(hsv,(0,0,170),(179,65,255)) > 0
         elapsed = (min(.15,max(0,now-self.seen_at))
                    if self.seen_at is not None and self.missing <= 3 else 0.0)
         shift_x,shift_y = (v*elapsed for v in self.velocity)
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            (cx,cy),radius = cv2.minEnclosingCircle(contour)
-            hull = cv2.convexHull(contour)
-            perimeter = cv2.arcLength(hull,True)
-            if (area < 70 or radius < 4 or not perimeter
-                    or area/(np.pi*radius*radius) < .28
-                    or 4*np.pi*cv2.contourArea(hull)/(perimeter*perimeter) < .60):
-                continue
-            # Only visit the circle's bounding region, not every camera pixel
-            # once per contour (costly on the Pi with noisy backgrounds).
-            cx,cy,radius = round(cx),round(cy),round(radius)
-            left,right = max(0,cx-radius),min(frame.shape[1],cx+radius+1)
-            top,bottom = max(0,cy-radius),min(frame.shape[0],cy+radius+1)
-            support = np.zeros((bottom-top,right-left),np.uint8)
-            cv2.circle(support,(cx-left,cy-top),radius,255,-1)
-            region = self.mask[top:bottom,left:right]
-            region[(support > 0)&white[top:bottom,left:right]] = 255
-        if self.last_box is not None and not self.seeded:
-            lx,ly,lw,lh = self.last_box
-            lx = max(0,min(frame.shape[1]-lw,round(lx+shift_x)))
-            ly = max(0,min(frame.shape[0]-lh,round(ly+shift_y)))
-            # Pure-white recovery stays within the old footprint. It must not
-            # grow into surrounding clothes while green is still present.
-            if np.count_nonzero(green[ly:ly+lh,lx:lx+lw]) < 20:
-                self.mask[ly:ly+lh,lx:lx+lw] |= (white[ly:ly+lh,lx:lx+lw]*255).astype(np.uint8)
-        kernel = np.ones((3,3),np.uint8)
-        self.mask = cv2.morphologyEx(self.mask,cv2.MORPH_OPEN,kernel)
-        pieces,_ = cv2.findContours(self.mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
-        span = 50
-        if pieces:
-            rect = cv2.boundingRect(max(pieces,key=cv2.contourArea))
-            span = max(rect[2:])
-        close_size = max(5,min(17,int(span*.06)|1))
-        self.mask = cv2.morphologyEx(self.mask,cv2.MORPH_CLOSE,np.ones((close_size,close_size),np.uint8))
-        contours,_ = cv2.findContours(self.mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
-        contours = list(contours)
-        # 强光下球面接近白色，单独检查亮区域，避免先与绿色地板连成一块。
-        # 仍走后面的圆形/圆弧检查，白色矩形不会因为亮就通过。
-        bright_color = cv2.inRange(hsv,(max(24,self.hue-self.hue_width),12,190),(high,255,255))
-        bright_white = cv2.inRange(hsv,(0,0,230),(179,65,255))
-        for bright_mask in (bright_color|bright_white,bright_white):
-            bright_mask = cv2.morphologyEx(bright_mask,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
-            bright_contours,_ = cv2.findContours(bright_mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
-            for contour in bright_contours:
-                x,y,w,h = cv2.boundingRect(contour)
-                if np.count_nonzero(green[y:y+h,x:x+w]) >= max(20,w*h*.005):
-                    contours.append(contour)
+        all_contours = []
+        self.mask = np.zeros(frame.shape[:2],np.uint8)
+        for index,green in enumerate(surfaces):
+            # White shirts/walls must not join the ball into one giant contour.
+            # Use OpenCV's enclosing circle to bound seam reconstruction locally.
+            surface = green.copy()
+            local_bright_region = np.zeros(frame.shape[:2],np.uint8)
+            seeds = cv2.morphologyEx(surface,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
+            contours,_ = cv2.findContours(seeds,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                (cx,cy),radius = cv2.minEnclosingCircle(contour)
+                hull = cv2.convexHull(contour)
+                perimeter = cv2.arcLength(hull,True)
+                if (area < 70 or radius < 4 or not perimeter
+                        or area/(np.pi*radius*radius) < .28
+                        or 4*np.pi*cv2.contourArea(hull)/(perimeter*perimeter) < .60):
+                    continue
+                # Only visit the circle's bounding region, not every camera pixel
+                # once per contour (costly on the Pi with noisy backgrounds).
+                cx,cy,radius = round(cx),round(cy),round(radius)
+                # 偏白球面的独立验证也限制在有色种子附近，不扫描整片白线。
+                cv2.circle(local_bright_region,(cx,cy),round(radius*1.5),255,-1)
+                left,right = max(0,cx-radius),min(frame.shape[1],cx+radius+1)
+                top,bottom = max(0,cy-radius),min(frame.shape[0],cy+radius+1)
+                support = np.zeros((bottom-top,right-left),np.uint8)
+                cv2.circle(support,(cx-left,cy-top),radius,255,-1)
+                region = surface[top:bottom,left:right]
+                region[(support > 0)&white[top:bottom,left:right]] = 255
+            if self.last_box is not None and not self.seeded:
+                lx,ly,lw,lh = self.last_box
+                lx = max(0,min(frame.shape[1]-lw,round(lx+shift_x)))
+                ly = max(0,min(frame.shape[0]-lh,round(ly+shift_y)))
+                # Pure-white recovery stays within the old footprint. It must not
+                # grow into surrounding clothes while green is still present.
+                if np.count_nonzero(green[ly:ly+lh,lx:lx+lw]) < 20:
+                    surface[ly:ly+lh,lx:lx+lw] |= (white[ly:ly+lh,lx:lx+lw]*255).astype(np.uint8)
+            kernel = np.ones((3,3),np.uint8)
+            surface = cv2.morphologyEx(surface,cv2.MORPH_OPEN,kernel)
+            pieces,_ = cv2.findContours(surface,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+            span = 50
+            if pieces:
+                rect = cv2.boundingRect(max(pieces,key=cv2.contourArea))
+                span = max(rect[2:])
+            close_size = max(5,min(17,int(span*.06)|1))
+            surface = cv2.morphologyEx(surface,cv2.MORPH_CLOSE,np.ones((close_size,close_size),np.uint8))
+            contours,_ = cv2.findContours(surface,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+            surface_contours = list(contours)
+            # 强光下球面接近白色，单独检查亮区域，避免先与绿色地板连成一块。
+            # 仍走后面的圆形/圆弧检查，白色矩形不会因为亮就通过。
+            bright_color = cv2.inRange(hsv,(max(24,self.hue-self.hue_width),12,190),(high,255,255))
+            bright_white = cv2.inRange(hsv,(0,0,230),(179,65,255))
+            for bright_mask in (bright_color|bright_white,bright_white):
+                if index == 0:
+                    bright_mask &= local_bright_region
+                bright_mask = cv2.morphologyEx(bright_mask,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
+                bright_contours,_ = cv2.findContours(bright_mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+                for contour in bright_contours:
+                    x,y,w,h = cv2.boundingRect(contour)
+                    if np.count_nonzero(green[y:y+h,x:x+w]) >= max(20,w*h*.005):
+                        surface_contours.append(contour)
+            all_contours.extend(surface_contours)
+            self.mask |= surface
+        green = strong|weak|pale
+        contours = all_contours
         candidates = []
         outside_candidates = []
         outside_lock = False
@@ -281,6 +299,13 @@ class PatchTracker:
                 polygon = cv2.approxPolyDP(hull,.025*perimeter,True)
                 if len(polygon) == 4 and cv2.contourArea(polygon)/hull_area > .90:
                     continue  # Solid green rectangles can also pass a loose roundness test.
+            # 完整目标主要按圆度及轮廓完整程度评分；贴边目标先通过圆弧检查。
+            perimeter = cv2.arcLength(hull,True)
+            shape_score = area/(w*h)
+            if not clipped:
+                roundness = 4*np.pi*hull_area/(perimeter*perimeter)
+                solidity = area/hull_area
+                shape_score = min(shape_score,roundness*solidity)
             if self.last_box:
                 # 手动框选仍限定首次目标，避免评分最高的背景抢走选中的球。
                 if self.seeded and self.overlap((x,y,w,h)) < .3:
@@ -295,9 +320,9 @@ class PatchTracker:
                     if wrong_position or wrong_size:
                         # 正常跟踪仍检查旧尺寸；恢复候选只受颜色与形状筛选限制。
                         outside_lock = True
-                        outside_candidates.append(((x,y,w,h),area/(w*h)))
+                        outside_candidates.append(((x,y,w,h),shape_score))
                         continue
-            candidates.append(((x,y,w,h),area/(w*h)))
+            candidates.append(((x,y,w,h),shape_score))
         # 旧错误框可能还学到了地板颜色。连续丢失后检查另一颜色带，
         # 手动采色保持用户选定颜色；有待确认候选时不切带清掉计数。
         if (not candidates and not outside_candidates and not _green_retry and not self.manual
@@ -332,7 +357,7 @@ class PatchTracker:
             self.recovery_box = None
         count = len(candidates)
         if candidates:
-            # score 是轮廓面积 / 包围框面积，不是识别概率。
+            # score 以圆度和轮廓完整程度为主，不是识别概率。
             # 先按评分选；同分时选面积较大的候选，避免取决于轮廓顺序。
             best = max(candidates, key=lambda item: (item[1], item[0][2]*item[0][3]))
             candidates = [best]

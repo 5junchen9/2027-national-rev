@@ -16,54 +16,45 @@ def enlarged_reference(reference):
 
 
 class BallDeparture:
-    """只比较同一腹部相机、同一头位的动作前后画面；不是进球判定。"""
-    def __init__(self, flip='none'):
-        self.flip = flip
+    """腹部前进一步后，连续未检测到球则结束；不判断实际进球。"""
+    def __init__(self):
         self.reset()
 
     def reset(self):
-        self.reference = None
+        self.angle = None
         self.frames = 0
         self.since = None
 
-    def arm(self, box, shape, angle, now=None):
-        x,y,w,h = box
-        cy = (y+h/2)/shape[0]
-        if self.flip in ('0','-1'): cy = 1-cy
-        self.reference = (w,h,cy,angle)
+    def arm(self, angle, now=None):
+        self.angle = angle
         self.started_at = time.monotonic() if now is None else now
         self.frames = 0
         self.since = None
 
-    def observe(self, box, stable_frames, shape, angle, now=None):
-        if self.reference is None: return None
+    def observe(self, box, angle, now=None):
+        if self.angle is None:
+            return None
         now = time.monotonic() if now is None else now
-        width,height,previous_y,previous_angle = self.reference
-        if angle != previous_angle or now-self.started_at > 3:
+        if angle != self.angle or now-self.started_at > 3:
             self.reset()
             return None
-        moved_away = False
-        if box is not None and stable_frames >= 3:
-            x,y,w,h = box
-            cy = (y+h/2)/shape[0]
-            if self.flip in ('0','-1'): cy = 1-cy
-            moved_away = (w <= width*.85 and w*h <= width*height*.65
-                          and previous_y-cy >= .06)
-        if moved_away:
-            if self.since is None: self.since = now
+        if box is None:
+            if self.since is None:
+                self.since = now
             self.frames += 1
             if self.frames >= 5 and now-self.since >= .3:
                 return 'DONE'
             return 'WAIT'
         self.frames = 0
         self.since = None
-        # 每次近处前进后先观察至少一秒；丢球不会被判为完成。
+        # 前进后至少观察一秒，球仍可见再交回对齐和前进。
         return 'WAIT' if now-self.started_at < 1 else None
 
 
 class WalkKick:
-    """可靠目标驱动动作；丢球只用头部反复上下搜索。"""
-    def __init__(self):
+    """稳定球驱动左右转和前进；丢球只用头部反复上下搜索。"""
+    def __init__(self, fixed_head=False):
+        self.fixed_head = fixed_head
         self.blind_steps = 0
         self.actions = 0
         self.pending = None
@@ -102,6 +93,9 @@ class WalkKick:
             self.search_since = now
             self.reason = 'visual reacquisition; hold and observe'
             return 'REACQUIRE'
+        if self.fixed_head:
+            self.reason = 'ball lost; head fixed at 129, hold body and observe'
+            return 'WAIT'
         self.reason = 'head search; observe each pose for 1.5 seconds'
         if now-self.search_since < 1.5:
             return 'WAIT'
@@ -151,8 +145,8 @@ class WalkKick:
                 self.reset_search()
                 x, y, width, height = head_box
                 error_x = (x+width/2)/shape[1]-.5
-                action = 'SIDE_LEFT' if error_x < -.08 else 'SIDE_RIGHT' if error_x > .08 else 'UP_LITTLE'
-                self.reason = 'head ball: align then approach'
+                action = 'TURN_LEFT' if error_x < -.08 else 'TURN_RIGHT' if error_x > .08 else 'UP_LITTLE'
+                self.reason = 'head ball: turn toward ball, then approach'
             else:
                 return self.search_action(now)
         else:
@@ -165,23 +159,21 @@ class WalkKick:
                 self.reason = 'belly ball visible but moving; hold body'
                 return 'WAIT'
             self.reset_search()
-            # 腹部接管后只根据球的位置横向对齐，再向前行走带球。
+            # 独立调试的腹部阶段同样转向对球；比赛检测到腹部球后交回前进3步。
             x,y,width,height = belly_box
             ball_error = (x+width/2)/shape[1]-.5
             if abs(ball_error) > .08:
-                action = 'SIDE_LEFT' if ball_error < 0 else 'SIDE_RIGHT'
-                self.reason = 'belly ball: move sideways to align'
+                action = 'TURN_LEFT' if ball_error < 0 else 'TURN_RIGHT'
+                self.reason = 'belly ball: turn toward ball'
             else:
                 action = 'UP_LITTLE'
                 self.reason = 'belly ball centered; walk forward'
 
-        if flip in ('1', '-1') and action.startswith('SIDE_'):
-            action = 'SIDE_RIGHT' if action == 'SIDE_LEFT' else 'SIDE_LEFT'
-        # 按当前实机反馈交换横移动作；前进及转向不变。
-        if action == 'SIDE_LEFT':
-            action = 'SIDE_RIGHT'
-        elif action == 'SIDE_RIGHT':
-            action = 'SIDE_LEFT'
+        # 沿用GitHub原dual_kick.KickPlanner的左右转及水平镜像映射。
+        # 原代码转向看球门，这里按当前要求看球；不恢复球门识别。
+        # https://github.com/5junchen9/2027-national-rev/blob/20be9378e1d3285162352732a19b360e2fcce7e6/app/dual_kick.py
+        if flip in ('1', '-1') and action in ('TURN_LEFT', 'TURN_RIGHT'):
+            action = 'TURN_RIGHT' if action == 'TURN_LEFT' else 'TURN_LEFT'
         self.confirm_frames = self.confirm_frames+1 if action == self.pending else 1
         self.pending = action
         return action if self.confirm_frames >= 5 else 'WAIT'

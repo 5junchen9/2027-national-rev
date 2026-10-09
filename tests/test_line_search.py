@@ -3,12 +3,83 @@ from itertools import count, cycle, chain, repeat
 from unittest.mock import Mock, patch
 import numpy as np
 
-from line_search_route import detect_line, line_mask, route_segments, near_line_sample, LinePlanner, run_course
+from line_search_route import detect_line, line_mask, route_segments, near_line_sample, LinePlanner, LineWidthReference, stripe_width, run_course
 from competition_line_main import LineCompetitionIO, run_line_test, main, GuardedRobot
 import types
 import cv2
 from competition_main import load_settings, CONFIG_FILE
 from kick_shapes import Box
+
+
+class LineWidthTests(unittest.TestCase):
+    def make_reference(self):
+        mask = np.zeros((480,640),np.uint8)
+        # 上方细、下方粗，模拟透视；分开记录各高度宽度。
+        mask[:240,316:325] = 255
+        mask[240:,312:329] = 255
+        reference = LineWidthReference()
+        segments = [(320,479,320,0)]
+        for _ in range(9):
+            reference.sample(mask, segments)
+        self.assertFalse(reference.ready)
+        reference.sample(mask, segments)
+        self.assertTrue(reference.ready)
+        return reference, mask, segments
+
+    def test_samples_ten_frames_and_locks_width_per_height(self):
+        reference, mask, segments = self.make_reference()
+        self.assertEqual(reference.widths[108],9)
+        self.assertEqual(reference.widths[396],17)
+        self.assertEqual(reference.filter(mask,segments),segments)
+        saved = reference.widths.copy()
+        reference.sample(np.zeros_like(mask),segments)
+        self.assertEqual(reference.widths,saved)
+
+    def test_rejects_both_thin_and_wide_false_lines(self):
+        reference, _, segments = self.make_reference()
+        for stripe_width_pixels in (3,35):
+            mask = np.zeros((480,640),np.uint8)
+            mask[:,320:320+stripe_width_pixels] = 255
+            self.assertEqual(reference.filter(mask,segments),[])
+
+    def test_missing_or_jumping_line_skips_frame_without_losing_samples(self):
+        mask = np.zeros((480,640),np.uint8)
+        mask[:,312:329] = 255
+        reference = LineWidthReference()
+        for _ in range(5):
+            reference.sample(mask,[(320,479,320,0)])
+        reference.sample(mask,[])
+        self.assertEqual(len(reference.frames),5)
+        self.assertFalse(reference.ready)
+        reference.sample(mask,[(320,479,320,0)])
+        shifted = np.roll(mask,80,axis=1)
+        reference.sample(shifted,[(400,479,400,0)])
+        self.assertEqual(len(reference.frames),6)
+
+    def test_no_actual_white_pixels_cannot_finish_sampling(self):
+        reference = LineWidthReference()
+        for _ in range(12):
+            reference.sample(np.zeros((480,640),np.uint8),[(320,479,320,0)])
+        self.assertFalse(reference.ready)
+
+    def test_diagonal_width_is_measured_perpendicular_to_stripe(self):
+        straight = np.zeros((480,640),np.uint8)
+        diagonal = np.zeros_like(straight)
+        cv2.line(straight,(320,0),(320,479),255,12)
+        cv2.line(diagonal,(100,400),(400,100),255,12)
+        self.assertLessEqual(abs(stripe_width(straight,320,250,0)-
+                                 stripe_width(diagonal,250,250,45)),2)
+        reference = LineWidthReference()
+        for _ in range(10):
+            reference.sample(straight,[(320,479,320,0)])
+        segments = [(100,400,400,100)]
+        self.assertEqual(reference.filter(diagonal,segments),segments)
+
+    def test_unobserved_height_is_not_rejected(self):
+        reference, _, _ = self.make_reference()
+        reference.widths = {396:17}
+        segment = [(100,200,100,50)]
+        self.assertEqual(reference.filter(np.zeros((480,640),np.uint8),segment),segment)
 
 
 class LineTests(unittest.TestCase):
@@ -153,7 +224,7 @@ class LineTests(unittest.TestCase):
         straight=np.zeros_like(head)
         cv2.line(straight,(400,479),(400,0),(255,255,255),12)
         diagonal=cv2.cvtColor(self.corner_mask(vertical=False),cv2.COLOR_GRAY2BGR)
-        frames=chain([straight,straight], [diagonal]*4, [np.zeros_like(straight)]*200)
+        frames=chain([straight]*2, [diagonal]*4, [np.zeros_like(straight)]*200)
         def observe():
             try:
                 return head,next(frames),{}
@@ -353,15 +424,51 @@ class LineTests(unittest.TestCase):
         self.assertEqual(io.robot.deadline,410)
 
     @patch('competition_line_main.cv2.imshow')
+    def test_width_sampling_starts_on_new_image_after_forward_returns(self, show):
+        for frame_count, samples, moves in ((2,0,1),(3,1,2),(13,10,12)):
+            with self.subTest(frame_count=frame_count):
+                io = self.make_io()
+                frame = np.zeros((480,640,3),np.uint8)
+                cv2.line(frame,(320,0),(320,479),(255,255,255),12)
+                io.observe_ready.side_effect = [(frame,frame,{})]*frame_count+[KeyboardInterrupt()]
+                reference = LineWidthReference()
+                original_sample = reference.sample
+                def sample_after_move(mask, segments):
+                    self.assertGreater(io.move.call_count,0)
+                    original_sample(mask,segments)
+                reference.sample = sample_after_move
+                with patch('competition_line_main.LineWidthReference',return_value=reference):
+                    with self.assertRaises(KeyboardInterrupt):
+                        io.follow_to_carry('red')
+                self.assertEqual(len(reference.frames),samples)
+                self.assertEqual(io.move.call_count,moves)
+                self.assertEqual(reference.ready,samples == 10)
+
+    @patch('competition_line_main.cv2.imshow')
+    def test_failed_forward_does_not_start_width_sampling(self, show):
+        io = self.make_io()
+        frame = np.zeros((480,640,3),np.uint8)
+        cv2.line(frame,(320,0),(320,479),(255,255,255),12)
+        io.observe_ready.side_effect = [(frame,frame,{})]*3
+        io.move.side_effect = RuntimeError('move failed')
+        reference = LineWidthReference()
+        with patch('competition_line_main.LineWidthReference',return_value=reference):
+            with self.assertRaisesRegex(RuntimeError,'move failed'):
+                io.follow_to_carry('red')
+        self.assertEqual(reference.frames,[])
+        self.assertFalse(reference.ready)
+
+    @patch('competition_line_main.cv2.imshow')
     def test_search_continues_beyond_configured_action_limit(self, show):
         io=self.make_io()
         io.settings['route_max_steps']=2
         frame=np.zeros((480,640,3),np.uint8)
+        cv2.line(frame,(320,0),(320,479),(255,255,255),12)
         io.observe_ready.side_effect=[(frame,frame,{})]*41+[KeyboardInterrupt()]
         with patch('competition_line_main.route_segments',return_value=([(320,479,320,0)],[])):
             with self.assertRaises(KeyboardInterrupt):
                 io.follow_to_carry('red')
-        self.assertEqual(io.move.call_count,40)
+        self.assertEqual(io.move.call_count,40)  # 采样不增加WAIT，第二帧即开始前进。
         self.assertTrue(all(call.args==('UP_LITTLE',) for call in io.move.call_args_list))
 
     @patch('competition_line_main.cv2.imshow')
@@ -390,8 +497,8 @@ class LineTests(unittest.TestCase):
         io=Mock();io.settings=load_settings(CONFIG_FILE)
         run_course(io,'red')
         io.follow_to_carry.assert_called_once_with('red')
-        io.forward.assert_called_once_with(3)
-        self.assertEqual([call.args[0] for call in io.scan_until.call_args_list],['face','dance'])
+        self.assertEqual([call.args[0] for call in io.forward.call_args_list],[3,10])
+        self.assertEqual([call.args[0] for call in io.scan_until.call_args_list],['face'])
         io.carry.assert_called_once_with('red','action2')
         names=[call[0] for call in io.method_calls]
         self.assertLess(names.index('stand'),names.index('follow_to_carry'))

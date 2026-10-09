@@ -13,27 +13,36 @@ def partial_edge_qr(frame):
     contours,hierarchy = cv2.findContours(binary,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
     if hierarchy is None:
         return None
+    height,width = frame.shape[:2]
     finders = []
     for index,contour in enumerate(contours):
         child = hierarchy[0,index,2]
         grandchild = hierarchy[0,child,2] if child >= 0 else -1
-        if grandchild < 0:
+        if child < 0:
             continue
         area = cv2.contourArea(contour)
         if area < 64:
             continue
         polygon = cv2.approxPolyDP(contour,.04*cv2.arcLength(contour,True),True)
-        if len(polygon) != 4 or not cv2.isContourConvex(polygon):
-            continue
         x,y,w,h = cv2.boundingRect(contour)
         if min(w,h) < 8 or not .5 <= w/h <= 2:
             continue
         # 定位图案由外黑框、内白框、中心黑块嵌套组成。
-        if not (.25 <= cv2.contourArea(contours[child])/area <= .9
-                and .08 <= cv2.contourArea(contours[grandchild])/area <= .55):
+        intact = (len(polygon) == 4 and cv2.isContourConvex(polygon)
+                  and grandchild >= 0
+                  and .25 <= cv2.contourArea(contours[child])/area <= .9
+                  and .08 <= cv2.contourArea(contours[grandchild])/area <= .55)
+        # 出画或模糊可破坏中心黑块嵌套；边缘残框仍须有内白孔和邻近模块。
+        inner = contours[child]
+        inner_polygon = cv2.approxPolyDP(inner,.04*cv2.arcLength(inner,True),True)
+        edge = min(x,y,width-x-w,height-y-h) <= 3
+        partial = (edge and 4 <= len(polygon) <= 6
+                   and 4 <= len(inner_polygon) <= 6
+                   and .15 <= cv2.contourArea(inner)/area <= .8
+                   and area/cv2.contourArea(cv2.convexHull(contour)) >= .6)
+        if not intact and not partial:
             continue
         finders.append(Box(x,y,w,h))
-    height,width = frame.shape[:2]
     candidates = []
     for finder in finders:
         size = (finder.width+finder.height)/2
@@ -51,7 +60,7 @@ def partial_edge_qr(frame):
                     and .4 <= w/h <= 2.5 and cv2.contourArea(contour) >= .007*size*size):
                 modules += 1
         # 只剩一个完整定位框时，还要有足够的邻近黑白模块，孤立方框不触发。
-        if len(finders) == 1 and modules >= 8:
+        if len(finders) == 1 and modules >= 6:
             candidates.append(finder)
     for index,first in enumerate(finders):
         for second in finders[index+1:]:

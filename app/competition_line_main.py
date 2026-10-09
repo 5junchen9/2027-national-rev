@@ -14,7 +14,8 @@ from carry_vision import find_blocks, BlockTracker
 from kick_shapes import overlap
 from dual_kick import camera_settings
 from line_search_route import (line_mask, route_segments, near_line_sample,
-                               LinePlanner, run_course, run_from_line)
+                               LinePlanner, LineWidthReference, run_course, run_from_line,
+                               run_from_carry)
 
 
 class LineCompetitionIO(CompetitionIO):
@@ -38,7 +39,10 @@ class LineCompetitionIO(CompetitionIO):
         self.open_views()
         self.stream.watch(None, None)  # 不等待left和action1，也不让二维码触发转向。
         planner = LinePlanner()
+        width_reference = LineWidthReference()
+        previous_forward_completed = False
         self.set_head(127)
+        print("[寻线] 正常前进后随走采10帧线宽，采样不额外停步。", flush=True)
         block_frames = 0
         previous_block = None
         block_tracker = BlockTracker(recover_head=True)
@@ -47,6 +51,7 @@ class LineCompetitionIO(CompetitionIO):
             blocks = find_blocks(head, color)
             block = block_tracker.update(blocks,frame=head,color=color)
             if block is not None:
+                previous_forward_completed = False
                 same_block = previous_block is not None and overlap(previous_block, block) > .3
                 block_frames = block_frames + 1 if same_block else 1
                 previous_block = block
@@ -68,11 +73,17 @@ class LineCompetitionIO(CompetitionIO):
             flip = camera_settings()["belly"]["flip"]
             vertical, diagonal = route_segments(mask, mirrored=flip in ("1", "-1"),
                                                 recovering=planner.after_bend)
+            vertical = width_reference.filter(mask, vertical)
+            diagonal = width_reference.filter(mask, diagonal)
             x, angle = near_line_sample(vertical, belly.shape[0], belly.shape[1],
                                         planner.previous_x)
             action = planner.decide(x, belly.shape[1], right_diagonal=bool(diagonal),
                                     angle=angle, mirrored=flip in ("1", "-1"),
                                     original_visible=bool(vertical))
+            # 上次前进已返回，当前新图仍满足直线前进条件，才用于线宽参考。
+            # 采样未完成时照常使用原寻线规则，不额外WAIT。
+            if previous_forward_completed and action == "UP_LITTLE" and x is not None:
+                width_reference.sample(mask, vertical)
             display = belly.copy()
             sample_top = round(belly.shape[0]*.75)
             cv2.line(display, (0,sample_top), (belly.shape[1]-1,sample_top), (0,255,255), 2)
@@ -82,14 +93,19 @@ class LineCompetitionIO(CompetitionIO):
             cv2.putText(display, action, (10,30), 0, .7, (0,255,0),2)
             cv2.putText(display, f"vertical={len(vertical)} diagonal={len(diagonal)} angle={angle:.1f}",
                         (10,60),0,.7,(0,255,0),2)
+            width_status = "width locked +/-30%" if width_reference.ready else f"width sampling {len(width_reference.frames)}/10"
+            cv2.putText(display, width_status, (10,90), 0,.7,(0,255,255),2)
             cv2.imshow("line search", display)
             cv2.imshow("line mask", mask)
             print("[寻线]", action, "全画面竖直段：", len(vertical),
                   "右弯斜段：", len(diagonal), "仅斜线确认：", planner.diagonal_frames,
-                  "角度：", round(angle,1), "弯后调正：", planner.after_bend, flush=True)
+                  "角度：", round(angle,1), "弯后调正：", planner.after_bend,
+                  "线宽：", width_status, flush=True)
             if action == "WAIT":
+                previous_forward_completed = False
                 continue  # 原地继续读取新图，可用Q或Ctrl+C退出。
             if action == "TURN_RIGHT_2":
+                previous_forward_completed = False
                 print("[寻线] 原竖直线已离开腹部画面，只剩右弯斜线，执行右转2次。", flush=True)
                 for number in range(1,3):
                     # 每次转向前检查双摄，掉线不继续。
@@ -98,6 +114,7 @@ class LineCompetitionIO(CompetitionIO):
                     self.move("TURN_RIGHT")
                 continue
             self.move(action)
+            previous_forward_completed = action == "UP_LITTLE"
 
 
 def preview_line(settings, line_color):
@@ -126,6 +143,8 @@ def preview_line(settings, line_color):
             cv2.putText(display,action,(10,30),0,.7,(0,255,0),2)
             cv2.putText(display,f"vertical={len(vertical)} diagonal={len(diagonal)} angle={angle:.1f}",
                         (10,60),0,.7,(0,255,0),2)
+            width_status = "width inactive (preview)"
+            cv2.putText(display, width_status, (10,90), 0,.7,(0,255,255),2)
             cv2.imshow("line search", display)
             cv2.imshow("line mask", mask)
     finally:
@@ -168,6 +187,7 @@ def main():
     parser.add_argument("--actions", action="store_true")
     parser.add_argument("--line-only", action="store_true", help="从当前位置直接实走寻线，不执行其他比赛阶段")
     parser.add_argument("--from-line", action="store_true", help="临时测试：跳过人脸，从寻线连续执行到跳舞；可搭配--simulate")
+    parser.add_argument("--from-carry", action="store_true", help="临时测试：跳过人脸和寻线，从搬运连续执行到跳舞；可搭配--simulate")
     args = parser.parse_args()
     if sum((args.check, args.simulate, args.preview)) > 1:
         parser.error("check、simulate、preview只能选一种")
@@ -177,8 +197,13 @@ def main():
         parser.error("仅寻线实走须使用 --run --actions --line-only")
     if args.from_line and (args.line_only or args.preview):
         parser.error("from-line不能与line-only或preview同时使用")
+    if args.from_carry and (args.from_line or args.line_only or args.preview):
+        parser.error("from-carry不能与from-line、line-only或preview同时使用")
     settings = load_settings(args.config)
     course = run_from_line if args.from_line else run_course
+    if args.from_carry:
+        course = run_from_carry
+    partial_start = args.from_line or args.from_carry
     if args.line_only:
         return run_line_test(settings, args.color, args.line_color)
     if args.simulate:
@@ -202,13 +227,13 @@ def main():
     from robot_audio import configure
     from chinese_speech import warm_up
     configure()
-    if not args.from_line:
+    if not partial_start:
         warm_up()
     io = LineCompetitionIO(settings, None, float('inf'))
     io.line_color = args.line_color
     with ExitStack() as stack:
         stack.callback(io.close_identity_models)
-        if not args.from_line:
+        if not partial_start:
             io.prepare_identity()
         deadline = time.monotonic() + settings["total_seconds"]
         io.deadline = deadline
@@ -229,4 +254,6 @@ def main():
         io.flush()
         if args.from_line:
             print("[后半程实走测试] 从当前位置寻线到跳舞；会抱物、转向和行走，请做好防倒保护。", flush=True)
+        if args.from_carry:
+            print("[搬运后半程实走测试] 从当前位置找物搬运到跳舞；会站立、抱物和行走，请做好防倒保护。", flush=True)
         return course(io, args.color)

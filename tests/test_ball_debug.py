@@ -6,6 +6,66 @@ from ball_debug import PatchTracker
 
 
 class BallDebugTests(unittest.TestCase):
+    def test_pale_round_ball_is_not_blocked_by_saturated_background(self):
+        for saturation in (15,25,50,100,200):
+            hsv=np.full((240,400,3),(110,150,150),np.uint8)
+            # 这个方块通过早期颜色种子检查，但不能关闭浅色圆球检测。
+            cv2.rectangle(hsv,(20,30),(80,90),(35,230,220),-1)
+            cv2.circle(hsv,(260,145),32,(35,saturation,225),-1)
+            tracker=PatchTracker()
+            for _ in range(5):
+                box=tracker.update(cv2.cvtColor(hsv,cv2.COLOR_HSV2BGR))
+            self.assertIsNotNone(box)
+            x,y,w,h=box
+            self.assertAlmostEqual(x+w/2,260,delta=3)
+            self.assertAlmostEqual(y+h/2,145,delta=3)
+            self.assertGreater(tracker.score,.55)
+            self.assertEqual(tracker.stable_frames,5)
+
+    def test_user_pale_ball_screenshot_detects_whole_surface(self):
+        # 用户截图的摄像头部分；已裁去桌面和黄色状态文字，不能当成原始视频。
+        frame=cv2.imread(str(Path(__file__).parent/'fixtures/tennis_head_pale_screenshot.png'))
+        tracker=PatchTracker()
+        for _ in range(6):
+            box=tracker.update(frame)
+        self.assertIsNotNone(box)
+        x,y,w,h=box
+        self.assertAlmostEqual(x+w/2,300,delta=6)
+        self.assertAlmostEqual(y+h/2,235,delta=6)
+        self.assertGreater(w,55)
+        self.assertGreater(h,55)
+        self.assertGreater(tracker.score,.55)
+        self.assertGreaterEqual(tracker.stable_frames,5)
+
+    def test_saturated_ball_touching_field_circle_and_line_stays_local(self):
+        hsv=np.full((480,640,3),(110,150,150),np.uint8)
+        # 带黄绿色色偏的低饱和场线，不能与球面一起进入初始颜色区域。
+        cv2.circle(hsv,(320,240),155,(31,45,240),15)
+        cv2.line(hsv,(0,280),(639,360),(31,45,240),12)
+        cv2.circle(hsv,(320,300),75,(31,230,230),-1)
+        cv2.line(hsv,(270,270),(340,320),(0,0,230),7)
+        frame=cv2.cvtColor(hsv,cv2.COLOR_HSV2BGR)
+        tracker=PatchTracker()
+        for _ in range(5):box=tracker.update(frame)
+        self.assertIsNotNone(box)
+        x,y,w,h=box
+        self.assertAlmostEqual(x+w/2,320,delta=10)
+        self.assertAlmostEqual(y+h/2,300,delta=10)
+        self.assertLess(w,180);self.assertLess(h,180)
+        self.assertGreater(tracker.score,.55)
+
+    def test_top_clipped_saturated_ball_beside_field_circle_passes_arc_check(self):
+        hsv=np.full((480,640,3),(110,150,150),np.uint8)
+        cv2.circle(hsv,(320,60),155,(31,45,240),15)
+        cv2.circle(hsv,(320,20),85,(31,230,230),-1)
+        frame=cv2.cvtColor(hsv,cv2.COLOR_HSV2BGR)
+        tracker=PatchTracker()
+        for _ in range(5):box=tracker.update(frame)
+        self.assertIsNotNone(box)
+        self.assertIn('top',tracker.edges)
+        self.assertLess(box[2],190)
+        self.assertGreater(tracker.score,.55)
+
     def test_dim_yellow_ball_passes_wider_color_thresholds(self):
         hsv=np.zeros((240,320,3),np.uint8)
         cv2.circle(hsv,(160,120),30,(29,50,90),-1)
@@ -68,6 +128,25 @@ class BallDebugTests(unittest.TestCase):
         for _ in range(12): box=tracker.update(frame)
         self.assertIsNotNone(box)
         self.assertGreater(box[0],450)
+        self.assertLess(tracker.hue,55)
+
+    def test_wrong_learned_color_recovers_even_when_body_turns_every_three_misses(self):
+        hsv=np.full((240,400,3),(110,150,150),np.uint8)
+        cv2.circle(hsv,(200,145),32,(35,25,225),-1)
+        frame=cv2.cvtColor(hsv,cv2.COLOR_HSV2BGR)
+        tracker=PatchTracker()
+        tracker.hue=66
+        tracker.color_learned=True
+        box=None
+        for i in range(9):
+            box=tracker.update(frame)
+            if box is not None:
+                break
+            if i%3 == 2:
+                tracker.notify_body_move()
+        self.assertIsNotNone(box)
+        self.assertAlmostEqual(box[0]+box[2]/2,200,delta=3)
+        self.assertGreater(tracker.score,.55)
         self.assertLess(tracker.hue,55)
 
     def test_new_white_paper_and_white_circle_without_color_hint_are_rejected(self):

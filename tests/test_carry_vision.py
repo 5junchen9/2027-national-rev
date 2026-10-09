@@ -14,6 +14,19 @@ from dual_kick import camera_settings
 
 
 class CarryVisionTests(unittest.TestCase):
+    def test_seven_corner_red_box_is_allowed_only_near_bottom_edge(self):
+        # 按现场截图的盒面轮廓重建：底边被画面截断，凸轮廓有7个角。
+        points = np.array([[412,177],[512,247],[603,406],[503,479],
+                           [342,479],[253,428],[267,290]], np.int32)
+        frame = np.full((480,640,3), (180,100,40), np.uint8)
+        cv2.fillConvexPoly(frame, points, (0,0,255))
+        self.assertEqual(len(find_blocks(frame,'red',near=True)), 1)
+        self.assertEqual(find_blocks(frame,'red',near=False), [])
+        # 完整可见的复杂形状仍采用原条件，避免把任意红色图案当盒子。
+        frame = np.full((480,640,3), (180,100,40), np.uint8)
+        cv2.fillConvexPoly(frame, points-np.array([0,40]), (0,0,255))
+        self.assertEqual(find_blocks(frame,'red',near=True), [])
+
     def test_old_head_d_is_rejected_without_changing_reference(self):
         for position in (125,127):
             reference = dict(pickup=[.4,.5,.1,.1],drop=[.4,.3,.2,.2],drop_head_position=position)
@@ -474,7 +487,7 @@ class CarryVisionTests(unittest.TestCase):
         self.assertEqual(self.confirmed_action(planner,Box(.43,.43,.1,.1)),'UP_LITTLE')
         self.assertEqual(self.confirmed_action(planner,Box(.4,.7,.1,.1)),'UP_LITTLE')
 
-    def test_logged_98_8_percent_bottom_now_reaches_sixty_percent_pickup_line(self):
+    def test_logged_26_2_percent_top_still_approaches_until_20_percent_line(self):
         for reference in (
             dict(pickup=[.278125,.1604166667,.446875,.55625]),
             dict(pickup=[.278125,.1604166667,.446875,.55625],
@@ -483,7 +496,7 @@ class CarryVisionTests(unittest.TestCase):
             with self.subTest(reference=reference):
                 planner = CarryPlanner(reference,'none')
                 logged = Box(.3,.262,.4,.726)
-                self.assertEqual(self.confirmed_action(planner,logged),'HOLD_BOX')
+                self.assertEqual(self.confirmed_action(planner,logged),'UP_LITTLE')
                 self.assertEqual(planner.belly_approach_steps,0)
                 # 完整框的下沿仍未出画，但上沿到线后应抱；不再依赖旧H下沿。
                 at_line = Box(.3,.20,.4,.788)
@@ -1038,11 +1051,11 @@ class CarryVisionTests(unittest.TestCase):
                          ['UP_LITTLE']*4+['HOLD_BOX','DOWN_BOX'])
         self.assertEqual([call.args[0] for call in servo.begin_vertical.call_args_list],[130,133,133])
 
-    def test_pickup_line_at_upper_40_percent_boundary(self):
+    def test_pickup_line_at_upper_20_percent_boundary(self):
         reference = self.reference()
-        self.assertEqual(carry_vision.pickup_action(Box(.3,.40,.4,.60),reference,'none'),'HOLD_BOX')
-        self.assertEqual(carry_vision.pickup_action(Box(.3,.41,.4,.59),reference,'none'),'UP_LITTLE')
-        self.assertEqual(carry_vision.pickup_action(Box(.3,.39,.4,.61),reference,'none'),'HOLD_BOX')
+        self.assertEqual(carry_vision.pickup_action(Box(.3,.20,.4,.80),reference,'none'),'HOLD_BOX')
+        self.assertEqual(carry_vision.pickup_action(Box(.3,.21,.4,.79),reference,'none'),'UP_LITTLE')
+        self.assertEqual(carry_vision.pickup_action(Box(.3,.19,.4,.81),reference,'none'),'HOLD_BOX')
         self.assertEqual(carry_vision.follow_head_angle(Box(.3,.6,.4,.2),123),129)
         self.assertEqual(carry_vision.follow_head_angle(Box(.3,.1,.4,.2),123),120)
         self.assertEqual(carry_vision.follow_head_angle(Box(.3,.4,.4,.2),123),123)

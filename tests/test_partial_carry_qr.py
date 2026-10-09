@@ -47,6 +47,17 @@ class PartialQRTests(unittest.TestCase):
                 cv2.rectangle(frame,(x,y),(x+9,y+9),(0,0,0),-1)
         self.assertIsNotNone(partial_edge_qr(frame))
 
+    def test_clipped_ring_without_center_block_needs_adjacent_modules(self):
+        frame=np.full((300,400,3),255,np.uint8)
+        # 底边出画、中心黑块嵌套断开，仍可见外框和内白孔。
+        cv2.rectangle(frame,(200,240),(269,309),(0,0,0),-1)
+        cv2.rectangle(frame,(210,250),(259,290),(255,255,255),-1)
+        self.assertIsNone(partial_edge_qr(frame))
+        for x in (110,130,150):
+            for y in (240,260):
+                cv2.rectangle(frame,(x,y),(x+9,y+9),(0,0,0),-1)
+        self.assertIsNotNone(partial_edge_qr(frame))
+
     def run_scan(self,boxes,contents=None,quit_after=False):
         head,belly,servo,robot=Mock(),Mock(),Mock(),Mock()
         frame=np.zeros((480,640,3),np.uint8)
@@ -73,22 +84,14 @@ class PartialQRTests(unittest.TestCase):
                      time.monotonic()+.5,7)
         return result,robot,observed,detect
 
-    def test_three_independent_detections_release_once(self):
-        box=Box(10,400,100,70)
-        result,robot,observed,_=self.run_scan([box]*3)
+    def test_one_detection_releases_once(self):
+        result,robot,observed,_=self.run_scan([Box(10,400,100,70)])
         self.assertIs(result,True)
-        self.assertGreaterEqual(len(observed),3)
+        self.assertGreaterEqual(len(observed),1)
         robot.robotMove.assert_called_once_with('DOWN_BOX')
 
-    def test_missing_frame_resets_consecutive_count(self):
-        box=Box(10,400,100,70)
-        result,robot,observed,_=self.run_scan([box,box,None,box,box,box])
-        self.assertIs(result,True)
-        self.assertGreaterEqual(len(observed),6)
-        robot.robotMove.assert_called_once_with('DOWN_BOX')
-
-    def test_two_detections_are_not_enough(self):
-        result,robot,_,_=self.run_scan([Box(10,400,100,70)]*2,quit_after=True)
+    def test_no_detection_does_not_release(self):
+        result,robot,_,_=self.run_scan([None],quit_after=True)
         self.assertIs(result,False)
         robot.robotMove.assert_not_called()
 

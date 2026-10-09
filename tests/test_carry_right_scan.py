@@ -45,15 +45,15 @@ class RightScanTests(unittest.TestCase):
         self.assertIs(result, True)
         self.assertEqual(actions,['SIDE_RIGHT_HOLDBOX']*3+['DOWN_BOX'])
 
-    def test_tenth_step_target_is_checked_before_fallback(self):
-        result, actions = self.scan(found_after=10)
+    def test_seventh_step_target_is_checked_before_fallback(self):
+        result, actions = self.scan(found_after=7)
         self.assertIs(result, True)
-        self.assertEqual(actions,['SIDE_RIGHT_HOLDBOX']*10+['DOWN_BOX'])
+        self.assertEqual(actions,['SIDE_RIGHT_HOLDBOX']*7+['DOWN_BOX'])
 
-    def test_limit_releases_once_before_turning_without_eleventh_step(self):
+    def test_limit_releases_once_without_fixed_turns_or_eighth_step(self):
         result, actions = self.scan()
         self.assertEqual(result,carry_vision.SCAN_LIMIT)
-        self.assertEqual(actions,['SIDE_RIGHT_HOLDBOX']*10+['DOWN_BOX']+['TURN_RIGHT']*7)
+        self.assertEqual(actions,['SIDE_RIGHT_HOLDBOX']*7+['DOWN_BOX'])
 
     def test_quit_stops_without_release_or_turn(self):
         result, actions = self.scan(quit_now=True)
@@ -97,18 +97,20 @@ class RightScanTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in robot.robotMove.call_args_list],
                          ['SIDE_RIGHT_HOLDBOX','DOWN_BOX'])
 
-    def test_both_courses_skip_sport_after_limit_and_keep_dance_sequence(self):
+    def test_both_courses_continue_sport_after_limit_and_keep_dance_sequence(self):
         import json
         settings=json.loads((ROOT/'config/competition.json').read_text())
         for course in (run_course,run_line_course):
             io=Mock();io.settings=settings;io.carry.return_value=carry_vision.SCAN_LIMIT
             self.assertTrue(course(io,'yellow'))
-            io.sport.assert_not_called()
-            io.scan_until.assert_any_call('dance','head',confirm_frames=2)
-            io.enter_blue.assert_called_once();io.dance.assert_called_once()
+            io.sport.assert_called_once()
+            io.find_dance.assert_called_once()
+            io.forward.assert_called_with(10)
+            io.enter_blue.assert_not_called();io.dance.assert_called_once()
             calls=[call[0] for call in io.method_calls]
-            self.assertLess(calls.index('enter_blue'),calls.index('dance'))
-            # 超限的右转已由搬运完成，路线不再追加足球后的7次转向。
+            self.assertLess(calls.index('find_dance'),calls.index('dance'))
+            # 足球正常结束后仍执行去舞区的转向。
+            self.assertLess(calls.index('sport'),calls.index('find_dance'))
             self.assertEqual(io.right.call_count,3 if course is run_course else 1)
 
     def test_new_side_step_keeps_grip_and_right_leg_trajectory(self):

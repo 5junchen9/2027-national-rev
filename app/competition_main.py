@@ -120,7 +120,7 @@ def preflight(settings, use_original_drop=False):
     for problem in problems:
         print("[未就绪]", problem)
     print("[说明] 各段右转和回程次数必须现场测量；blue比例不能证明整机已进入舞区。")
-    print("[说明] 足球沿用行走带球，连续确认球远离后退出；不证明进球。")
+    print("[说明] 足球腹部识别到球后前进8步，再右转找dance最多9次；不证明进球。")
     return not problems
 
 
@@ -397,27 +397,91 @@ class CompetitionIO:
         from carry_vision import run
         result = run(color, target, actions=True, robot=self.robot,
                    search_right_actions=self.settings["delivery_search_right_actions"], deadline=self.deadline,
-                   right_scan=True, exit_right_actions=self.settings.get("carry_exit_right_actions",7),
+                   right_scan=True,
                    qr_reader=read_codes, use_original_drop=self.use_original_drop,
                    eyes=(self.head_eye, self.belly_eye), servo=self.servo)
         if not result:
             raise RuntimeError("搬运未完成，停止比赛")
-        next_head = "dance_head_position" if result == "scan_limit" else "sport_head_position"
-        self.resume_route(self.settings[next_head])
+        self.resume_route(129)
         return result
 
-    def align_football(self):
-        from football_align import run
-        run(self)
+    def find_ball(self):
+        """头位129，只右转找球；球心稳定进入30%至70%后启动足球。"""
+        from ball_debug import PatchTracker
+        from walk_kick import MIN_BALL_SCORE
+        self.set_head(129)
+        tracker = PatchTracker()
+        deadline = min(self.deadline, time.monotonic()+90)
+        turns = 0
+        search_frames = 0
+        confirmed = 0
+        while time.monotonic() < deadline:
+            head, _, _ = self.observe_ready()
+            box = tracker.update(head)
+            if tracker.score < MIN_BALL_SCORE:
+                box = None
+            display = head.copy()
+            if box is None:
+                confirmed = 0
+                search_frames += 1
+            else:
+                x,y,w,h = box
+                cv2.rectangle(display,(x,y),(x+w,y+h),(0,255,0),2)
+                center = (x+w/2)/head.shape[1]
+                if .30 <= center <= .70:
+                    search_frames = 0
+                    confirmed = confirmed+1 if tracker.stable_frames >= 3 else 0
+                else:
+                    confirmed = 0
+                    search_frames += 1
+            cv2.putText(display,f'find ball head=129 turns={turns}/30 found={confirmed}/3',
+                        (8,25),0,.55,(0,255,255),1)
+            position = '-' if box is None else f'{center:.1%}'
+            cv2.putText(display,f'ball x={position} score={tracker.score:.2f} stable={tracker.stable_frames}',
+                        (8,48),0,.5,(0,255,255),1)
+            cv2.imshow('competition ball search',display)
+            if confirmed >= 3:
+                print(f'[找球] 球心={center:.1%}，稳定进入30%至70%，停止右转并启动足球模块。',flush=True)
+                return
+            # 连续3帧没有居中的球就只右转一步；看到中心区候选先停下确认。
+            if search_frames < 3:
+                continue
+            if turns >= 30:
+                break
+            reason = f'未检测到有效球，score={tracker.score:.2f}，{tracker.reason}' if box is None else f'已检测到球，球心={center:.1%}，未进入30%至70%'
+            print(f'[找球] TURN_RIGHT {reason}；已转向次数: {turns}',flush=True)
+            self.move('TURN_RIGHT')
+            turns += 1
+            tracker.notify_body_move()
+            search_frames = confirmed = 0
+        raise RuntimeError('头位129找球超时或转向30次仍未确认中心区网球，停止比赛')
 
     def sport(self):
+        self.find_ball()
         self.stop_route()
         from handover_debug import run
-        if not run(forward=self.settings["sport_head_position"],
+        if not run(forward=129,
                    fps=camera_settings()["head"]["fps"], actions=True, robot=self.robot,
-                   deadline=self.deadline, eyes=(self.head_eye, self.belly_eye), servo=self.servo):
+                   deadline=self.deadline, eyes=(self.head_eye, self.belly_eye), servo=self.servo,
+                   finish_on_belly=True):
             raise RuntimeError("足球阶段未完成，停止比赛")
         self.resume_route()
+        self.forward(8)
+
+    def find_dance(self):
+        """每右转一步重新识别dance，最多9次；接近至腹部确认同一码。"""
+        self.set_head(self.settings["dance_head_position"])
+        self.stream.watch(None, None)
+        for turns in range(10):
+            # 先观察当前位置，之后最多执行9个右转。
+            head, _, _ = self.observe_ready()
+            codes = read_codes(head)
+            if [text for text, _ in codes].count(self.settings["dance_qr"]) == 1:
+                self.scan_until(self.settings["dance_qr"], "belly", confirm_frames=1)
+                return
+            if turns < 9:
+                self.right(1)
+        raise RuntimeError("右转9次仍未找到dance二维码，停止比赛")
 
     def enter_blue(self):
         entry = BlueEntry(self.settings["blue_min_ratio"], self.settings["blue_confirm_frames"])
@@ -482,12 +546,12 @@ def simulate(settings, color):
         def right(self, count): print("[模拟动作] TURN_RIGHT ×", count, "；角度未验证")
         def left(self, count): print("[模拟动作] TURN_LEFT ×", count, "；转向，不是横移")
         def carry(self, color, target):
-            print("[模拟搬运]", color, "HOLD_BOX → 抱物右平移最多10次并扫码", target,
-                  "→ 腹部识别目标码就放下；超限原地放下并右转接dance，转角未实测")
+            print("[模拟搬运]", color, "HOLD_BOX → 抱物右平移最多7次并扫码", target,
+                  "→ 腹部识别目标码就放下；超限原地放下，仍继续足球")
             return True
-        def align_football(self): print("[模拟对齐] 搜索足球区双层白框与中圈 → 转向 → 横移居中；不验证实际识别")
-        def sport(self): print("[模拟足球] 行走带球 → 连续确认球远离 → 停止；进球未验证")
+        def sport(self): print("[模拟足球] 头位129只右转，球心稳定进入30%至70%后启动足球模块 → 腹部识别球 → 前进8步；进球未验证")
         def set_head(self, position): print("[模拟头部]", position)
+        def find_dance(self): print("[模拟舞区] 头位120，右转找dance最多9次，前进至腹部确认dance")
         def enter_blue(self): print("[模拟舞区] 近远蓝地连续确认 → 补偿步数", settings["blue_extra_steps"])
         def dance(self): print("[模拟舞蹈] 音乐 + DANCE1/3/4/5")
     print("[模拟动作] STAND一次；不访问硬件")
