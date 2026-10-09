@@ -1,0 +1,535 @@
+{
+  "交接元信息": {
+    "用途": "当前机器人比赛代码的完整转接记录，供现场同步和下一轮对话接续；不是实机验收报告",
+    "生成时间": "2026-10-09T08:58:50+08:00",
+    "时区": "Asia/Shanghai",
+    "本地项目": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env",
+    "树莓派项目": "/home/yuting/robot_env",
+    "本文件": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/docs/比赛流程详细转接-20261009-085850.json",
+    "Git仓库": "https://github.com/5junchen9/2027-national-rev",
+    "分支": "main",
+    "代码快照提交": "3856c09d75aa8be018913f74821a5ea48e961ef3",
+    "代码提交链接": "https://github.com/5junchen9/2027-national-rev/commit/3856c09d75aa8be018913f74821a5ea48e961ef3",
+    "Git说明": "运行代码及测试已提交并推送；本JSON在后续独立文档提交中保存，代码快照提交固定指向其依据，避免自引用提交号",
+    "依据": "当前源码、最新用户要求、实际重跑的软件检查及用户回传的文件SHA256；历史文档只作背景资料",
+    "优先级": "本文件描述上述代码提交的实际行为；早期交接中的127头位、40%-60%入口、平移对球、3步和蓝地入舞流程均已被后续要求替代",
+    "硬件边界": "只修改本地镜像，没有远程控制树莓派、发送实机身体动作或覆盖现场标定"
+  },
+  "用户当前要求和实际实现": [
+    "搬运抱取的腹部80%指从底部向上80%，实现为物块上沿从顶部算y<=20%；不是球识别置信度80%。",
+    "搬运腹部边缘部分二维码检测1次即可放下；完整目标码也是独立解码1次。部分码不代表已识别文本。",
+    "放下后只为足球调整入场方向：头位129，入口只右转，球心在画面横向30%至70%稳定确认后才调用足球。",
+    "入口没有运行足球动作控制器；足球模块只在find_ball返回后启动，不存在两个阶段同时发身体动作的设计。",
+    "足球内部使用左右转而不是左右平移对球；沿用原GitHub dual_kick的转向与水平镜像映射。",
+    "找球及足球头部固定129；丢球后也不抬头或低头扫描。",
+    "比赛足球腹部检测到有效球后，交回比赛控制器，前进8次UP_LITTLE。",
+    "随后以头部寻找dance，最多右转9次，目标完整文本解码1次即可；腹部也解码1次dance后再前进10步跳舞。",
+    "球检测优先看圆形或可见圆弧的形状，保留黄绿色提示和背景差异；并非完全不看颜色。",
+    "修复浅色球被高饱和背景候选关闭的问题，以及每3帧右转清零丢球计数、阻止颜色恢复的问题。",
+    "保留寻线中头部稳定看到指定颜色物块后交接搬运的出口和随走线宽采样。"
+  ],
+  "完整流程": {
+    "寻线正式入口": {
+      "脚本": "competition_line.py",
+      "实现": "app/competition_line_main.py",
+      "路线": "app/line_search_route.py"
+    },
+    "普通扫码入口": {
+      "脚本": "competition.py",
+      "实现": "app/competition_main.py",
+      "路线": "app/competition_route.py"
+    },
+    "寻线正式比赛顺序": [
+      "腹部扫码face",
+      "后退1次",
+      "右转1次",
+      "下蹲",
+      "姓名及性别识别",
+      "站立",
+      "左转1次",
+      "前进3次回到寻线起点",
+      "腹部寻线，同时头部寻找指定颜色物块",
+      "物块稳定3帧后交接双摄搬运",
+      "对物接近、腹部横向对齐、上沿到顶部20%线后抱起",
+      "抱物右平移并腹部后台扫码，确认投放或最多7次后原地放下",
+      "头位129，只右转寻找球；球心稳定进入30%-70%后启动足球",
+      "足球模块固定129，以左右转和前进对球接近，腹部识别到有效球就返回",
+      "比赛控制器前进8次UP_LITTLE",
+      "头位dance_head_position，头部找dance；最多右转9次",
+      "头部解码dance一次后向前接近，腹部解码dance一次即停",
+      "再前进10次UP_LITTLE",
+      "播放dance.mp3并执行DANCE1、DANCE3、DANCE4、DANCE5"
+    ],
+    "普通扫码前半程": "face、人脸阶段后，腹部找left，按left_right_actions右转；腹部找action1，按action1_right_actions右转，再搬运；后半程同上。",
+    "from-line": "跳过face、身份识别和回起点3步，从当前位置寻线，连续执行搬运、足球和舞蹈。",
+    "from-carry": "跳过face、身份识别和寻线，从当前位置寻找指定颜色物块并搬运，再连续执行足球和舞蹈；不是已经抱着物品开始。",
+    "line-only": "只寻线，确认指定颜色物块后结束，不自动继续搬运。",
+    "失败分支": "一般阶段失败停止整条链；搬运返回scan_limit是允许继续足球的特殊情况，不跳过足球。"
+  },
+  "控制权转接": [
+    {
+      "阶段": "搬运",
+      "身体控制": "carry_vision.run",
+      "退出": "已放下并返回True或scan_limit；随后resume_route(129)"
+    },
+    {
+      "阶段": "足球入口",
+      "身体控制": "CompetitionIO.find_ball",
+      "动作": "只TURN_RIGHT；没有足球内部TURN_LEFT/SIDE_LEFT/SIDE_RIGHT",
+      "出口": "有效球心在30%-70%，稳定计数>=3，入口连续确认3次"
+    },
+    {
+      "阶段": "足球",
+      "启动顺序": "find_ball返回 -> stop_route关闭比赛后台视觉 -> handover_debug.run",
+      "身体控制": "handover_debug中的WalkKick",
+      "设备": "复用已打开双摄、舵机和唯一身体连接"
+    },
+    {
+      "阶段": "腹部识别后",
+      "退出": "finish_on_belly=True且有效腹部框非空，返回True；足球控制循环结束",
+      "身体控制": "CompetitionIO恢复比赛视觉后forward(8)"
+    },
+    {
+      "阶段": "dance",
+      "身体控制": "CompetitionIO.find_dance及scan_until",
+      "顺序": "头部扫到完整dance -> 腹部扫码接近 -> forward(10) -> dance"
+    }
+  ],
+  "寻线当前细节": {
+    "头位": 127,
+    "寻迹结束条件": "头部指定颜色物块连续3帧关联稳定，框重叠要求大于0.3；不要求到线末端，也不要求已经到抓取距离。",
+    "提前进入搬运的解释": "这是保留的状态机出口，不是腹部地线消失条件；机器人仍需在搬运阶段接近物块。",
+    "线图像": "对全腹部画面提取线；只在底部25%取近线位置和角度。",
+    "白线阈值": {
+      "HSV下限": [
+        0,
+        0,
+        150
+      ],
+      "HSV上限": [
+        179,
+        80,
+        255
+      ]
+    },
+    "黑线阈值": "灰度<100",
+    "二维码干扰处理": "遮挡识别出的二维码附近区域，并排除多孔白纸候选；并不能保证排除所有二维码白边。",
+    "线宽采样": {
+      "触发": "正常前进返回后的有效近直线观察，累计10幅，不额外停步等待采样",
+      "是否要求10幅连续": false,
+      "高度间隔像素": 24,
+      "每高度最少有效样本": 7,
+      "参考宽度": "取中位数",
+      "过滤范围": "参考的70%至130%；多数有参考的高度符合才放行；未采过的高度放行",
+      "持续更新": false,
+      "保存到标定文件": false
+    },
+    "动作顺序": "先按近线横向偏移平移，再按线角转向，确认稳定后前进。",
+    "稳定确认": "2帧，位置变化不超过画宽6%，角度变化不超过10度。",
+    "横向阈值": "60/640乘当前画宽",
+    "角度阈值度": 10,
+    "右弯": "全画面原直线消失且右斜线连续确认2帧，右转两次后重新调正。",
+    "限制": [
+      "没有完整左弯、岔路规划或主动丢线搜索。",
+      "起点跟错线会锁错参考线宽；同宽二维码白边仍可能漏过。",
+      "身体动作返回不证明机器人发生了预期物理位移。",
+      "左右映射受镜像和实机动作定义影响，不能凭画面直觉直接反转。"
+    ],
+    "说明文档": "docs/寻线起点线宽采样-20261009.md"
+  },
+  "搬运及放下": {
+    "实现": "app/carry_vision.py",
+    "稳定要求": "接近、腹部接手和抱起确认使用PICKUP_FRAMES=2；保存标定仍FINAL_FRAMES=5。",
+    "抱取线": {
+      "PICKUP_TOP": 0.2,
+      "解释": "从底部80%等于从顶部20%",
+      "比较对象": "物块框上沿，先满足横向对齐，再要求y<=0.20",
+      "H标定": "标准路径只参考横向位置，旧H下沿不终止接近",
+      "保护": "腹部最终接近最多6次UP_LITTLE，仍未达线则STOP",
+      "例外": "reference.pickup_mode=visible_region时使用已有region_pickup_action，需结合现场标定核对"
+    },
+    "近处轮廓": "仅near且底部出画时允许最多8个角，其他候选最多6个角；保留颜色、背景差异和凸包比例检查。",
+    "头部": "搬运找物有自己的跟踪/搜索逻辑，120-140范围；投放右移扫码头位133。129固定要求针对找球和足球，不针对整场搬运。",
+    "抱起动作": "HOLD_BOX -> 抱低处物块-减小前倾测试.dzz",
+    "右移扫码": {
+      "摄像头": "腹部",
+      "动作": "SIDE_RIGHT_HOLDBOX -> 搬运右平移-测试.dzz",
+      "上限": 7,
+      "动作后观察秒": 1.2,
+      "解码": "后台读双摄、单任务解码，忙时不排队旧图；每步结束等待至少一次解码完成"
+    },
+    "放下条件": [
+      {
+        "条件": "完整目标文本精确等于drop_qr，当前本地配置action2",
+        "次数": 1,
+        "动作": "DOWN_BOX -> 松.dzz",
+        "结果": "True"
+      },
+      {
+        "条件": "当前没有已解码文本，腹部有合格边缘部分码结构",
+        "次数": 1,
+        "动作": "DOWN_BOX",
+        "结果": "True",
+        "边界": "仅检测二维码外观，不能确认属于action2"
+      },
+      {
+        "条件": "已解出其他文本",
+        "处理": "不使用部分码分支绕过目标文本条件"
+      },
+      {
+        "条件": "7次右移仍未确认",
+        "动作": "原地DOWN_BOX",
+        "结果": "scan_limit；比赛继续找球、足球、dance"
+      }
+    ],
+    "部分码结构": "定位框/边缘残框、内外嵌套比例、凸性/凸包比例及邻近黑白模块；不是任意黑白边缘。",
+    "投放边界": "比赛right_scan路径满足扫码条件就放下，不再执行D/J精细投放位置对齐；单次外观检测较易误触发。"
+  },
+  "足球入口找球": {
+    "实现": "app/competition_main.py::CompetitionIO.find_ball",
+    "头位": 129,
+    "检测器": "PatchTracker，入口新建实例，最低有效score=0.55",
+    "球心水平比例": "(x+w/2)/画面宽度",
+    "允许区间": [
+      0.3,
+      0.7
+    ],
+    "边界包含": true,
+    "确认": "有效框位于区间且tracker.stable_frames>=3时累计；连续3次确认才返回。新目标一般需至少5幅连续稳定图。",
+    "没有居中球": "连续3幅未检出有效球或有效球在区间外 -> TURN_RIGHT一次 -> 清掉旧像素锁重新观察。",
+    "中心球未稳定": "先停下确认，不继续转向。",
+    "入口禁用": [
+      "TURN_LEFT",
+      "左右平移对球",
+      "球场边线/白矩形/中圈结构对齐",
+      "未完成入口就启动足球动作循环"
+    ],
+    "搜索上限": {
+      "右转": 30,
+      "秒": 90,
+      "额外约束": "同时受比赛deadline约束"
+    },
+    "失败": "超时、达到上限或相机失败则停止整场，不盲目前进。",
+    "阶段区别": "足球内部中心范围42%-58%比入口30%-70%窄，因此交接后足球还可能继续转向；这是串行阶段各自规则。"
+  },
+  "球检测及最新漏检修复": {
+    "实现": "app/ball_debug.py::PatchTracker",
+    "主判据": "候选圆度、凸包、实心程度、宽高关系和可见圆弧；保留黄绿色提示及局部背景差异。单目图像没有直接证明三维球形。",
+    "两路候选": "高饱和strong与weak|pale分别找轮廓，再按形状评分选择；高饱和背景不能关闭浅色检测。",
+    "HSV阈值": {
+      "strong": "S>=max(80,min_s), V>=min(min_v,80)",
+      "weak": "S>=min(min_s,45), V>=min(min_v,80)",
+      "pale": "S>=12, V>=max(160,min_v)",
+      "默认色相": "hue=40, hue_width=14；自动黄绿色下界至少28，上界至多85",
+      "局部白缝": "S<=65,V>=170，只在球面局部重建，不把全图白地线当新球"
+    },
+    "形状评分": "完整球score=min(填充率,圆度*实心度)；边缘球先过可见圆弧检查。最低有效score=0.55，不是识别概率。",
+    "保留拒绝": "白纸/方块、地线粘连、与背景几乎无差异的绿色区域、错误位置/尺寸关联。",
+    "本次确定的软件问题": {
+      "前提": "识别器曾自动学到不适合当前球的色相，例如hue=66。不能从截图确定实机当时的色相。",
+      "旧机制": "丢球计数missing>=3后才检查另一色相带；检查发生在本帧missing增加之前。",
+      "冲突": "入口连续3幅漏检便右转，notify_body_move调用begin_search把missing清零，导致下一幅永远达不到色相恢复条件。",
+      "复现": "截图静态输入+误学hue=66；不转向第4幅恢复，而每3幅调用转向重置则持续score=0。",
+      "修复": "notify_body_move仍清除旧位置、速度和稳定计数，但保存并恢复missing；实际检测到球后missing正常归零。",
+      "范围": "begin_search手动重新搜索的原行为保留，没有修改现场颜色标定文件。",
+      "证据边界": "这是能造成当前现象的可复现代码缺陷，尚不能断言是现场唯一根因。"
+    },
+    "用户树莓派校验证据": {
+      "用户回传旧SHA256": "a8e599bf1d5c1a215f133a0fd204e4f86d881fa1fb305efbb994e5b15d64ad43",
+      "意义": "与上次本地检测文件一致，排除了该文件版本不同；未证明其他模块相同，也未证明已重启进程。",
+      "本次新SHA256": "5c01517691d79595bf1b95c503ac0db4b6f60117ec78c453fa0335265aa26044"
+    },
+    "最新截图离线检查": {
+      "原始路径": "/tmp/codex-clipboard-78d7ed4f-b525-4bd3-b64e-ae6ab4fb584f.png",
+      "裁剪": "y=490:915,x=787:1427；避开桌面与黄色叠加字",
+      "输入状态": "hue=66且color_learned=True，每3幅漏检通知一次身体转向",
+      "修复后": "第4幅识别框x=441,y=188,w=64,h=60，score约0.713",
+      "位置": "球心约73.9%画宽，仍在入口30%-70%之外；识别成功不等于应立即交接",
+      "限制": "重复静态截图只能验证软件候选与恢复逻辑，不代表实际视频稳定性、曝光或帧率；临时截图路径不保证长期存在。"
+    },
+    "手动辅助": "handover_debug窗口S选择头部球、B选择腹部球，拖框回车；R重建检测器。比赛find_ball入口没有同样的选择按键流程。",
+    "剩余限制": [
+      "极端过曝导致完全失去色相提示仍可能漏检",
+      "远处小球、遮挡、运动模糊、地线接触仍需现场验证",
+      "尚未采集连续原始视频，没有实测树莓派检测帧率"
+    ]
+  },
+  "足球内部": {
+    "启动": "CompetitionIO.sport先完成find_ball，再停止比赛后台视觉，调用handover_debug.run(forward=129,finish_on_belly=True)。",
+    "模块": "app/handover_debug.py + app/walk_kick.py",
+    "头位": "INITIAL_HEAD_POSITION=129；Handover.step不跟踪俯仰；WalkKick(fixed_head=True)丢球不启用上下扫描。",
+    "方向": "head球心<42% -> TURN_LEFT，>58% -> TURN_RIGHT，否则UP_LITTLE；摄像头水平镜像flip=1或-1时左右互换。",
+    "稳定": "普通跟球决策要求跟踪稳定5帧，动作方向也累计连续5次才发送；每个身体动作后重新观察。",
+    "原GitHub逻辑来源": "app/dual_kick.py，历史提交20be9378e1d3285162352732a19b360e2fcce7e6；只复用左右转和水平镜像映射，并非完整恢复旧踢球流程。",
+    "动作范围": "左右转和UP_LITTLE行走带球，没有启动专用RIGHT_BALL/LEFT_BALL踢球动作，没有球门识别。",
+    "比赛完成条件": "动作允许且头部/身体观察等待结束后，腹部框非空且score>=0.55，即返回True；不要求腹部稳定5帧，不等腹部失球，也不需要先切换到BELLY状态。",
+    "返回后": "恢复比赛视觉，前进8次UP_LITTLE；随后进入find_dance。",
+    "失球": "暂停身体，视觉重找，头位129；不会凭丢球自动认定比赛足球完成。",
+    "上限": "WalkKick最多30次身体动作；同时受比赛deadline约束。",
+    "独立调试区别": "handover_debug默认finish_on_belly=False，仍保留腹部前进一步后3秒窗口内连续5幅且至少0.3秒未检出球的BallDeparture规则；该规则不用于当前比赛8步分支。",
+    "物理含义": "腹部检测和8次行走不是进球判定；步是动作文件执行次数，不是精确距离。"
+  },
+  "dance及跳舞": {
+    "搜索头位": "使用config/competition.json的dance_head_position，本地值120；读取现场实际值。",
+    "搜索摄像头": "头部",
+    "目标": "完整文本等于dance_qr，本地值dance",
+    "头部确认次数": 1,
+    "搜索顺序": "先看当前位置；未识别则右转1次再看，最多9次右转、10个观察位置；读到目标只出现一次才接受。",
+    "接近": "头部确认后调用scan_until(dance_qr,belly,confirm_frames=1)，逐次UP_LITTLE靠近，腹部完整目标码解码1次即结束接近。",
+    "接近上限": "沿用route_max_steps=30、route_timeout_seconds=90并受总deadline约束；腹部始终不可见则停止。",
+    "后续前进": 10,
+    "已停用的比赛调用": [
+      "足球后固定after_sport_right_actions次右转",
+      "enter_blue蓝地区域确认",
+      "蓝地确认后blue_extra_steps前进"
+    ],
+    "舞蹈": "assets/music/dance.mp3；DANCE1、DANCE3、DANCE4、DANCE5；DANCE2因后仰停用。",
+    "音乐失败": "未正常持续播放或动作完成前提前结束则停止后续舞蹈。",
+    "限制": "腹部二维码是接近依据，不是距离传感器；不能保证整机已入舞区；本地没有验证8步与10步实际距离。"
+  },
+  "配置与现场保留": {
+    "本轮配置字段新增或修改": [],
+    "本地competition配置仅作参考": {
+      "face_qr": "face",
+      "factory_qr": "left",
+      "carry_qr": "action1",
+      "drop_qr": "action2",
+      "dance_qr": "dance",
+      "legacy_root": "../Desktop/robot_legacy",
+      "face_head_position": 131,
+      "dance_head_position": 120,
+      "sport_head_position": 125,
+      "qr_confirm_frames": 3,
+      "route_max_steps": 30,
+      "route_timeout_seconds": 90,
+      "observe_seconds": 1.0,
+      "left_right_actions": 3,
+      "action1_right_actions": 3,
+      "delivery_right_actions": 1,
+      "delivery_search_right_actions": 5,
+      "after_sport_right_actions": 7,
+      "total_seconds": 480,
+      "blue_roi_near": [
+        0.2,
+        0.6,
+        0.8,
+        0.95
+      ],
+      "blue_roi_far": [
+        0.2,
+        0.3,
+        0.8,
+        0.6
+      ],
+      "blue_min_ratio": 0.65,
+      "blue_confirm_frames": 5,
+      "blue_extra_steps": 1,
+      "carry_exit_right_actions": 7
+    },
+    "优先实际调用": "sport_head_position本地仍为125，当前找球与足球实际硬编码129；无需为本轮覆盖现场配置。",
+    "保留但比赛后半程不再使用": "after_sport_right_actions、carry_exit_right_actions、blue_roi_near、blue_roi_far、blue_min_ratio、blue_confirm_frames、blue_extra_steps；部分字段仍在加载校验或独立函数中使用，不建议直接删除。",
+    "必须保留现场标定": [
+      "config/carry_dual_reference.json",
+      "config/head_calibration.json",
+      "config/right_foot_reference.json",
+      "其他现场相机、颜色、动作配置和环境变量"
+    ],
+    "预检差异": "预检仍可能读取sport_head_position及旧蓝地等字段，不能把预检打印或历史配置当作当前运行分支的动作依据。",
+    "相机": "沿用现场camera_settings的设备、后端、flip、分辨率；保存的双摄视图及图像尺寸必须匹配；不在交接中假定摄像头编号。"
+  },
+  "计时与必要保护": {
+    "配置总秒数": 480,
+    "寻迹例外": "寻迹耗时补回总期限；因此不是严格墙钟8分钟。",
+    "启动": "先检查双摄尺寸与搬运/足球参考匹配，再建立身体串口；RobotMove构造会自动发送一次STAND。",
+    "退出": "Q、Esc或Ctrl+C；已发送的身体动作无法撤回。",
+    "相机失败": "停止当前流程，不能把读取失败当成球正常消失。",
+    "实机要求": "站立、平移、抱物、行走、跳舞时全程防倒保护；本交接不授权远程操作真实机器人。"
+  },
+  "树莓派使用命令": {
+    "进入环境": [
+      "cd /home/yuting/robot_env",
+      "source venv/bin/activate"
+    ],
+    "校验本次检测文件": "sha256sum app/ball_debug.py",
+    "从搬运模拟": "python3 competition_line.py --from-carry --simulate --color blue",
+    "从寻线模拟": "python3 competition_line.py --from-line --simulate --color blue",
+    "普通比赛模拟": "python3 competition.py --simulate --color blue",
+    "从搬运预检": "python3 competition_line.py --from-carry --check",
+    "从搬运实际执行": "python3 competition_line.py --from-carry --run --actions --color blue",
+    "从寻线实际执行": "python3 competition_line.py --from-line --run --actions --color blue --line-color white",
+    "寻线完整比赛": "python3 competition_line.py --run --actions --color blue --line-color white",
+    "普通扫码完整比赛": "python3 competition.py --run --actions --color blue",
+    "仅寻线": "python3 competition_line.py --run --actions --line-only --color blue --line-color white",
+    "参数": "color按实物选择red/yellow/blue；line-color可选white/black；比赛现有摄像头和串口环境变量继续沿用。",
+    "模拟边界": "Mock流程只验证调用顺序，不打开相机、不发送身体动作，也不会实际运行足球内部8步检测循环；8步逻辑由单元测试覆盖。",
+    "预检边界": "部分流程仍沿用整场资源预检，可能要求人脸、OCR、语音及舞蹈资源；预检成功不代表实机功能正常。",
+    "重启要求": "替换Python文件后退出旧进程并重新启动；正在运行的进程不会自动加载磁盘新文件。",
+    "退出": "Q、Esc或Ctrl+C；已经发出的身体动作无法撤回。"
+  },
+  "精确同步清单": {
+    "仅接续刚才SHA256版本的球识别修复": [
+      "app/ball_debug.py"
+    ],
+    "覆盖当前全部运行改动": [
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_main.py",
+        "target": "/home/yuting/robot_env/app/competition_main.py",
+        "repository_path": "app/competition_main.py",
+        "role": "共用比赛控制器；入口找球、足球串行交接、腹部球后8步、dance搜索和接近",
+        "sha256": "e0b6995ab4f11d6cb47b74f3ac331ebfd7b48bdd87ee98a5c7491f1ca6b959db"
+      },
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_line_main.py",
+        "target": "/home/yuting/robot_env/app/competition_line_main.py",
+        "repository_path": "app/competition_line_main.py",
+        "role": "寻线版入口、随走线宽采样、from-line和from-carry临时测试",
+        "sha256": "c6f4921162b8479243dda20a03969581ec9a27736fa0e10559f62b2f109bcec6"
+      },
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/line_search_route.py",
+        "target": "/home/yuting/robot_env/app/line_search_route.py",
+        "repository_path": "app/line_search_route.py",
+        "role": "寻线决策、线宽参考及寻线版后半程顺序",
+        "sha256": "b4ecde105ef0104ce35bb28cc5d642e4b36337fe7cfbf6d52fa2d825081c06d0"
+      },
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_route.py",
+        "target": "/home/yuting/robot_env/app/competition_route.py",
+        "repository_path": "app/competition_route.py",
+        "role": "普通扫码路线与后台视觉；支持每段独立指定二维码确认次数",
+        "sha256": "e3f88abeb12d3c61e067487ac3b981e29f18dfd106b8be0e69affcf175a85aa1"
+      },
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/competition_qr.py",
+        "target": "/home/yuting/robot_env/app/competition_qr.py",
+        "repository_path": "app/competition_qr.py",
+        "role": "完整二维码解码、图像增强和边缘部分二维码结构检测",
+        "sha256": "1a6a8c748aa9d91f0797d078806b9364c929fdd2481b243b40f29951aea9ca66"
+      },
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/carry_vision.py",
+        "target": "/home/yuting/robot_env/app/carry_vision.py",
+        "repository_path": "app/carry_vision.py",
+        "role": "双摄搬运、80%抱取线、7次抱物右移上限和单次二维码投放",
+        "sha256": "387be918f065303ece1d16bfe0c5cc8f78c3a1f811843061da4543a29197512a"
+      },
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/handover_debug.py",
+        "target": "/home/yuting/robot_env/app/handover_debug.py",
+        "repository_path": "app/handover_debug.py",
+        "role": "固定头位129、双摄足球控制与腹部有效球立即交回比赛",
+        "sha256": "b2fa993061c899d523bc88754c98d56e498d5c9d5f0c850cc3024b864e37aa51"
+      },
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/walk_kick.py",
+        "target": "/home/yuting/robot_env/app/walk_kick.py",
+        "repository_path": "app/walk_kick.py",
+        "role": "足球左右转向及前进决策；丢球固定头位；独立调试完成规则",
+        "sha256": "6c4bab9ea2b95b6a13e6961b6a258c3a5d5caf08aa7968eb058db7fbdeab7c8d"
+      },
+      {
+        "source": "/media/wujuncheng/新加卷/13470/Desktop/E/raspberry_pi/home/yuting/robot_env/app/ball_debug.py",
+        "target": "/home/yuting/robot_env/app/ball_debug.py",
+        "repository_path": "app/ball_debug.py",
+        "role": "球形评分、并行浅色/饱和色候选与转向后的颜色恢复修复",
+        "sha256": "5c01517691d79595bf1b95c503ac0db4b6f60117ec78c453fa0335265aa26044"
+      }
+    ],
+    "操作": "逐个用本地source覆盖树莓派target，退出旧程序后重新运行；代码推送GitHub不等于现场已经部署。",
+    "不需传入": [
+      "tests/及测试图片",
+      "docs/及交接JSON作为运行依赖",
+      "assets/app历史副本"
+    ],
+    "不得整体覆盖": "config目录、现场标定、模型、动作资产及虚拟环境；本轮没有动作文件和配置字段改动。",
+    "同步校验": "在Pi依次运行sha256sum app/ball_debug.py等文件，与本清单sha256比对；当前仅收到旧ball_debug.py一致的证据，尚未收到新版或全部文件校验。"
+  },
+  "本轮验证": {
+    "性质": "本地软件测试与静态截图检查，未操作实体机器人",
+    "代码提交前最新回归": {
+      "命令": "PYTHONPATH=app:hardware:lib:tests python3 -m unittest test_ball_debug test_competition_ball_search test_walk_kick test_handover_debug test_competition test_carry_vision test_line_to_dance test_line_search test_carry_right_scan test_partial_carry_qr",
+      "通过数": 333,
+      "结果": "OK",
+      "日志": "/tmp/robot-git-handoff-tests.log",
+      "覆盖": "球检测与误学颜色恢复、入口与实际检测器串联、转向和头位、腹部球与8步、二维码1次、dance9次上限及10步、搬运抱取边界、寻线线宽采样和部分流程。"
+    },
+    "故障回归": "新增两项测试，修复前分别无法检出球及找球超时；修复后均通过。",
+    "前一轮回归": "276项相关测试通过；本轮333项包含这些测试及更多搬运/寻线测试。",
+    "模拟": "普通比赛、from-carry及from-line三种模拟均退出0。",
+    "其他检查": "9个运行文件py_compile通过，git diff --check通过。",
+    "未宣称全目录测试通过": "本轮没有执行整个tests目录；早期全目录运行记录含足球场旧断言、人脸旧头位断言及桌面缺RPi.GPIO等问题，不用局部通过掩盖。",
+    "未验证": [
+      "Pi新版文件是否已同步并重启",
+      "连续视频识别稳定性与Pi帧率",
+      "物块实际抱起、放下位置及80%线适用性",
+      "左右转映射与步长",
+      "腹部球可见位置、8步/10步距离",
+      "二维码搜索成功、入舞区及舞蹈",
+      "真实进球"
+    ]
+  },
+  "现场排查顺序": [
+    {
+      "现象": "截图有球但score=0",
+      "检查": "先比对新版SHA256并重启，再确认入口还是足球、球颜色是否过曝、是否误学背景；本次已修复转向清零丢球计数。仍失败需原始视频/原帧和运行命令。"
+    },
+    {
+      "现象": "识别到球但还在右转",
+      "检查": "看球心水平比例是否在30%-70%；最新截图球心约74%，即使成功识别也尚未进入入口区间。score=0才属于未检出。"
+    },
+    {
+      "现象": "出现左转",
+      "检查": "先看是否已打印稳定进入30%-70%并启动足球；入口不发左转，足球内部左右转。若交接前有左转，核对competition_main版本和是否另有机器人控制进程。"
+    },
+    {
+      "现象": "球在中心但found不增长",
+      "检查": "分别看有效score>=0.55、stable_frames>=3及连续确认计数；不能只凭肉眼位置认定识别已通过。"
+    },
+    {
+      "现象": "腹部见球后没有8步",
+      "检查": "是否经CompetitionIO.sport调用finish_on_belly=True；独立handover_debug默认走另一完成规则。"
+    },
+    {
+      "现象": "dance头部已看到仍继续靠近",
+      "检查": "当前头部只负责找方向，腹部也要完整解码一次dance才结束接近，之后才额外10步。"
+    },
+    {
+      "现象": "搬运早放或错放",
+      "检查": "边缘部分码现在只确认一次，不能证明目标文本；记录触发日志与腹部图像，检查是否因7次右移上限原地放下。"
+    },
+    {
+      "现象": "80%抱取不符合预期",
+      "检查": "本实现比较物块上沿y<=20%，不是占屏80%或中心y>=80%；检查现场pickup_mode及最多6次接近限制。"
+    },
+    {
+      "现象": "发现物块就结束寻线",
+      "检查": "这是稳定3帧物块交接搬运的既定出口，不是走到线末端条件。"
+    }
+  ],
+  "历史资料与已替代行为": {
+    "保留原因": "不删除旧文档和代码记录；仅便于追溯。历史记录不应当作当前运行要求。",
+    "已过时文档": [
+      "docs/比赛流程详细交接-20261009-051620.json",
+      "docs/比赛流程修改-20261009.md",
+      "docs/寻线到跳舞临时测试-20261009.md中的旧头位/平移/舞区说明"
+    ],
+    "本版替代": [
+      "抱取60%或70% -> 80%（上沿y<=20%）",
+      "边缘码连续3次 -> 1次",
+      "入口头位127 -> 129",
+      "入口40%-60% -> 30%-70%",
+      "足球左右平移 -> 左右转",
+      "比赛腹部球后3步/失球结束 -> 有效球立即返回后8步",
+      "足球后固定右转7次 -> 头部右转找dance最多9次",
+      "dance两次或蓝地确认 -> 头部1次、腹部1次、再10步"
+    ],
+    "下一轮注意": [
+      "先读本JSON并核对代码提交和Pi实际校验值",
+      "不因旧文档恢复过时分支",
+      "仅在本地镜像修改并给出精确替换路径",
+      "不覆盖现场配置和标定",
+      "只实现明确要求的基本功能，硬件操作保留必要保护",
+      "本轮未保存任何Wi-Fi密码、访问令牌或凭据"
+    ]
+  }
+}
